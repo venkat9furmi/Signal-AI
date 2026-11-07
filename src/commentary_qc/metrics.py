@@ -242,6 +242,18 @@ class WindowAnalyzer:
         self._seq = 0
         self._samples_seen = 0
 
+    @property
+    def elapsed(self) -> float:
+        """Seconds of audio analysed on this connection.
+
+        The same clock the ``t`` field of every window carries, exposed so
+        that anything reading this audio alongside the analyzer -- the
+        translation segmenter -- timestamps its output on the same scale as
+        the measurements. That is what lets a caption be lined up with the
+        loudness trace taken at the moment it was spoken.
+        """
+        return self._samples_seen / self.rate
+
     def reset(self) -> None:
         """Clear all stream state. Called after a reconnect."""
         self.vad.reset()

@@ -68,6 +68,9 @@ h1,h2,h3,h4{margin:0;text-wrap:balance}
 .tile.bad{border-top-color:var(--red)}    .tile.bad .n{color:var(--red)}
 .tile.on{border-top-color:var(--yellow)}
 .tile.zero .n{color:var(--idle)}
+a.navlink{color:var(--dim);text-decoration:none;font-size:12.5px;white-space:nowrap;
+  border:1px solid var(--line);border-radius:999px;padding:5px 11px;background:var(--sunk)}
+a.navlink:hover{color:var(--yellow);border-color:var(--yellow)}
 .ticker{padding:10px 24px;font-size:12.5px;color:var(--dim);background:#000;border-bottom:1px solid var(--line)}
 .ticker b{color:var(--ink);font-weight:600}
 
@@ -288,6 +291,7 @@ svg text{font-family:"IBM Plex Mono",monospace;font-size:10.5px;fill:var(--dim)}
     <span class="pill" id="hFix"><i></i><b>Match times</b><span>loading…</span></span>
     <span class="pill" id="hSlack"><i></i><b>Slack</b><span>—</span></span>
   </div>
+  <a class="navlink" href="/translate">Translation &rarr;</a>
   <span class="clock mono" id="clock"></span>
 </header>
 

@@ -96,12 +96,18 @@ class ChannelMonitor:
         notifier=None,
         shutdown: threading.Event | None = None,
         outage: "OutageTracker | None" = None,
+        translator=None,
     ) -> None:
         self.channel = channel
         self.url = url
         self.settings = settings
         self.store = store
         self.notifier = notifier
+        #: The translation pipeline, or None when the feature is off. A
+        #: passenger: it is asked for a tap once per connection and otherwise
+        #: receives nothing but buffered audio. Nothing in this class waits on
+        #: it, so a slow or broken provider cannot delay an alert.
+        self.translator = translator
         # Service-wide shutdown, shared with the supervisor. Needed as well as
         # the per-monitor flag: when the whole process group is signalled, every
         # ffmpeg dies at once and a monitor can observe EOF before its own stop
@@ -193,6 +199,20 @@ class ChannelMonitor:
             self.channel.name, live=True, session=self.session, since=self.started
         )
 
+        tap = None
+        tap_claimed = bool(self.claim)
+        tap_gen = -1
+        if self.translator is not None:
+            tap_gen = getattr(self.translator, "generation", 0)
+            try:
+                tap = self.translator.tap(
+                    self.channel.name, self.session,
+                    language=self.channel.language or "",
+                    claimed=bool(self.claim),
+                )
+            except Exception:  # noqa: BLE001 - never block monitoring on this
+                log.exception("could not start translating %s", self.channel.name)
+
         in_gap = False
         try:
             for block in self._source.blocks():
@@ -218,15 +238,49 @@ class ChannelMonitor:
                             since=self.started, active=["stream_down"],
                         )
                     analyzer.reset()
+                    if tap is not None:
+                        # Audio either side of an outage is not one phrase.
+                        tap.reset()
                     continue
                 if in_gap:
                     in_gap = False
                     self.outage.ok(self.channel.name)
                     self._emit(engine.on_reconnect(block.wall).to_dict())
 
+                # Two things change whether this channel should be translated:
+                # a claim arriving or being released, and somebody moving the
+                # mode or the model on the page. Comparing both against what
+                # we last saw keeps this off the per-block path while still
+                # letting translation be switched on in the middle of a match.
+                if self.translator is not None:
+                    gen = getattr(self.translator, "generation", 0)
+                    if bool(self.claim) != tap_claimed or gen != tap_gen:
+                        tap_claimed = bool(self.claim)
+                        tap_gen = gen
+                        try:
+                            if tap is not None:
+                                tap.close()
+                            tap = self.translator.tap(
+                                self.channel.name, self.session,
+                                language=self.channel.language or "",
+                                claimed=tap_claimed,
+                            )
+                        except Exception:  # noqa: BLE001
+                            log.exception("could not retap %s", self.channel.name)
+                            tap = None
+
+                if tap is not None:
+                    tap.audio(block.samples, block.wall, analyzer.elapsed)
+
                 for window in analyzer.push(block.samples, block.wall):
                     row = window.to_dict()
                     self.last_window = row
+                    if tap is not None:
+                        # The speech ratio the QC rules already needed is what
+                        # tells the segmenter where the sentence ended, so
+                        # finding the pauses costs no second pass over the
+                        # audio and no second VAD.
+                        tap.window(row.get("speech_ratio"))
                     if self.settings.emit_metrics and self._store_this_window(window.seq):
                         self.store.record_metrics(self.channel.name, self.session, row)
                     alerts = engine.push(window)
@@ -248,6 +302,15 @@ class ChannelMonitor:
             log.exception("monitor for %s died", self.channel.name)
         finally:
             self._source.stop()
+            if tap is not None:
+                # The last phrase before a channel goes off air is usually the
+                # full-time summary; dropping it loses the end of every match.
+                try:
+                    tap.close()
+                except Exception:  # noqa: BLE001 - teardown must not raise
+                    log.debug("could not flush the translation tap", exc_info=True)
+            if self.translator is not None:
+                self.translator.release(self.channel.name)
             self.store.set_channel_state(self.channel.name, live=False, session=self.session)
             self.store.clear_since(self.channel.name)
             log.info("OFF    %-8s stopped watching", self.channel.short)
@@ -279,11 +342,15 @@ class Supervisor:
         claims_path: str | None = None,
         claim_poll_s: float = 3.0,
         retention_days: float = 7.0,
+        translator=None,
     ) -> None:
         self.registry = registry
         self.settings = settings
         self.store = store
         self.notifier = notifier
+        #: The translation pipeline, handed to each monitor. None when the
+        #: feature is switched off, which is the default.
+        self.translator = translator
         #: How often to log a line per channel even when nothing is wrong.
         #: Without it the log falls silent between alerts and there is no way
         #: to tell a healthy feed from a dead recorder.
@@ -357,7 +424,19 @@ class Supervisor:
             "configured": sorted(set(self.registry.channels) - self._claim_only),
             "slack": getattr(self.notifier, "mode", "off"),
             "stopped": stopped,
+            # The page runs in another container and cannot see the pipeline's
+            # counters directly, so they ride along with the heartbeat.
+            "translate": self._translate_stats(),
         })
+
+    def _translate_stats(self) -> dict:
+        if self.translator is None:
+            return {"mode": "off", "running": False}
+        try:
+            return self.translator.stats()
+        except Exception:  # noqa: BLE001 - the heartbeat must always be written
+            log.debug("could not read translation stats", exc_info=True)
+            return {"mode": "unknown", "running": False}
 
     def _log_status(self) -> None:
         """Periodic per-channel line so a quiet log still proves life."""
@@ -466,7 +545,7 @@ class Supervisor:
         claim = self._claims.get(name)
         monitor = ChannelMonitor(
             status.channel, status.url, self.settings, self.store, self.notifier,
-            shutdown=self._stop, outage=self._outage,
+            shutdown=self._stop, outage=self._outage, translator=self.translator,
         )
         monitor.claim = claim
         self._monitors[name] = monitor.start()

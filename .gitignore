@@ -1,6 +1,9 @@
 # --- secrets -----------------------------------------------------------
 # Slack bot token and the page passcode. Never commit this.
 .slack.env
+# The Camb AI key and the translation switches. `.translate.env.example` IS
+# committed as the template; the filled-in file never is.
+.translate.env
 .env
 
 # --- environments and caches -------------------------------------------

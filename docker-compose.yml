@@ -19,6 +19,11 @@ services:
     env_file:
       - path: .slack.env
         required: false
+      # Translation credentials and switches, also optional. Without the file
+      # the pipeline starts in `off` and costs nothing; the page can still
+      # switch it to shadow with the offline provider, which needs no key.
+      - path: .translate.env
+        required: false
     volumes:
       # A named volume, NOT a host folder. SQLite in WAL mode needs real
       # shared memory between the writer and its readers, and a Windows bind
@@ -38,6 +43,10 @@ services:
       - --log=/data/live.log
       - --metrics
       - --prune-days=7
+      # Starts off unless QC_TRANSLATE_MODE says otherwise. The page writes the
+      # mode into claims.db and the recorder picks it up within seconds, so
+      # translation can be switched on mid-match without a restart.
+      - --translate-daily-minutes=60
     stop_grace_period: 20s   # let it mark channels off air and flush the queue
 
   web:
@@ -50,6 +59,11 @@ services:
     # localhost. Set it before exposing the page to a network.
     env_file:
       - path: .slack.env
+        required: false
+      # The page needs these too: it reads which providers are enabled, and
+      # whether a key is present, to say why a model cannot be selected. It
+      # never sends the key anywhere.
+      - path: .translate.env
         required: false
     depends_on:
       - recorder

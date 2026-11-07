@@ -25,4 +25,5 @@ mod-snapshot.json
 
 # Credentials: passed in as environment variables, never copied in.
 .slack.env
+.translate.env
 .env

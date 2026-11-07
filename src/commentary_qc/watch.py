@@ -24,6 +24,8 @@ from .notify import SlackNotifier
 from .registry import Registry, default_channels
 from .store import EventStore
 from .supervisor import Supervisor
+from .translate import TranslationPipeline, TranslateSettings
+from .translate.settings import Mode
 
 log = logging.getLogger("commentary_qc.watch")
 
@@ -78,6 +80,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--log", help="Also write the log to this file, flushed on every line.")
     p.add_argument("--status-every", type=float, default=300.0,
                    help="Seconds between per-channel status lines (default 300).")
+    p.add_argument("--translate", choices=Mode.ALL, default=None,
+                   help="Transcribe and translate commentary: 'off', 'shadow' (runs and "
+                        "stores everything but publishes nothing) or 'prod'. The page can "
+                        "change this at runtime; this only sets the starting value. "
+                        "Defaults to QC_TRANSLATE_MODE, or off.")
+    p.add_argument("--translate-provider", default=None,
+                   help="Which model: 'mock' (offline and free) or 'camb'. Camb needs "
+                        "CAMB_API_KEY. Defaults to QC_TRANSLATE_PROVIDER, or mock.")
+    p.add_argument("--translate-target", default=None,
+                   help="Language everything is translated into (default en-us).")
+    p.add_argument("--translate-daily-minutes", type=float, default=None,
+                   help="Hard cap on audio sent to the provider per UTC day. This is the "
+                        "free-credit guard; the pipeline stops and says so.")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
 
@@ -130,9 +145,40 @@ def main(argv: list[str] | None = None) -> int:
         channel_id=args.slack_channel,
         min_severity=args.min_severity,
     )
+    # The translation layer is optional and off unless asked for. Built here
+    # rather than inside the supervisor so that a bad configuration -- a mode
+    # with no key, an unknown provider -- fails at startup with one readable
+    # line, instead of once per segment on every channel.
+    translator = None
+    tcfg = TranslateSettings.from_env()
+    overrides = {}
+    if args.translate:
+        overrides["mode"] = args.translate
+    if args.translate_provider:
+        overrides["provider"] = args.translate_provider
+    if args.translate_target:
+        overrides["target_language"] = args.translate_target
+    if args.translate_daily_minutes is not None:
+        overrides["daily_minutes"] = args.translate_daily_minutes
+    if overrides:
+        tcfg = dataclasses.replace(tcfg, **overrides)
+    if tcfg.provider == "camb" and not tcfg.camb_api_key and tcfg.mode != Mode.OFF:
+        log.error("--translate %s asks for Camb AI but CAMB_API_KEY is not set; "
+                  "staying off. Use --translate-provider mock to run it offline.",
+                  tcfg.mode)
+        tcfg = dataclasses.replace(tcfg, mode=Mode.OFF)
+    # Started even when off: the page writes the mode into the claims file and
+    # the pipeline picks it up within seconds, so translation can be switched
+    # on mid-match without restarting the recorder. An off pipeline installs
+    # no tap, so it costs a few idle threads and nothing else.
+    translator = TranslationPipeline(
+        tcfg, store, control_path=args.claims or None
+    ).start()
+
     supervisor = Supervisor(
         registry, settings, store, notifier, args.status_every,
         claims_path=args.claims or None, retention_days=args.prune_days,
+        translator=translator,
     )
 
     def _handle(signum, frame):  # noqa: ANN001
@@ -155,9 +201,14 @@ def main(argv: list[str] | None = None) -> int:
              th.too_loud_clear_lufs, th.true_peak_dbtp, th.crowd_dominating_db,
              th.voice_dominates_db, th.filler_loop_score)
     log.info("=" * 78)
+    log.info("translation  |  mode %s  |  provider %s  |  -> %s  |  %.0f min/day cap",
+             tcfg.mode, tcfg.provider, tcfg.target_language, tcfg.daily_minutes)
+    log.info("=" * 78)
     try:
         supervisor.run()
     finally:
+        if translator is not None:
+            translator.stop()
         notifier.close()
         store.close()
     return 0

@@ -443,3 +443,126 @@ passcode→303 + cookie; signed in `/`→200 and `/api/*`→200; forged cookie�
 `python-multipart` is required for the sign-in form and is now in
 requirements.txt - without it FastAPI raises at startup and the page never
 boots.
+
+## Session 5 - 2026-11-07: live Slack test, and the translation layer
+
+**Slack proven on real faults, not filler.** Earlier tests only ever caught the
+vendor's holding clip. This time three live channels were claimed while they
+were actually carrying matches - Ch.41 (German), Ch.31 (Portuguese), Ch.100
+(Greek) - and **38 alerts were delivered with zero Slack errors**: 19 FIRE,
+1 ESCALATE, 18 CLEAR, across `clipping`, `peak_over`, `too_loud`, `too_quiet`,
+`crowd_dominating` and `filler_playing`. Ch.31's "commentator buried in crowd"
+escalated from -12.3 dB to -30.0 dB and the ESCALATE fired correctly.
+
+**Open noise problem found by that test.** Ch.31 fired `clipping` seven times
+with an *identical* message each time - "17 samples at full scale, true peak
++2.5 dBTP", about every 30 s - starting 14:22:53, while `filler_playing` on the
+same channel only fired at 14:28:38. The identical numbers are the signature of
+MMC's own holding clip (recorded in Session 4 as clipping at +2.7 dBTP). So for
+roughly six minutes the clip's distortion was being reported as the
+commentator's fault. `_CLIP_MASKED` does freeze peak rules while a clip plays,
+but the repeat test needs ~3 minutes of history and the "undecided" freeze only
+covers the first ~3 minutes of a *connection* - it does not cover a channel
+that was live and then switched to a clip. Worth fixing: a repeated identical
+clipping message is itself evidence of a recording.
+
+### Translation (new, `src/commentary_qc/translate/`)
+
+Transcribe and translate live commentary, as a passenger on the QC engine - the
+audio is already pulled, decoded and split into speech and gaps for the quality
+rules, so this is one more read of a buffer that exists anyway.
+
+**Ports and adapters**, because the model will change and the vendor might:
+`models` (vocabulary) - `settings` - `ports` (two capabilities) - `mappers/`
+(vendor JSON <-> our types, pure and unit-tested) - `providers/` (one adapter
+per model, from a registry) - `segmenter` - `budget` - `control` - `pipeline` -
+`store` - `api`. Nothing in the pipeline, the API or the page knows a
+provider's name.
+
+**Three modes**, and the gap between the middle two is the point:
+- `off` - no tap is installed, no audio buffered, no credit spendable. Default.
+- `shadow` - the whole pipeline on real matches, every result stored, **nothing
+  published**. With the `mock` provider this is free, so segmenting, latency and
+  volume can be measured across all 52 channels for nothing.
+- `prod` - the same pipeline, published. Promoting is a switch, not a rewrite.
+
+**Switching is live and crosses processes.** The page writes a
+`translate_control` row into `claims.db` (which the web app owns) and the
+recorder reads it - the same single-writer mechanism claims already use. A
+dedicated poll thread in the pipeline picks it up within ~3 s and bumps a
+`generation` counter that running monitors compare against, so turning
+translation on reaches channels **already on air**. Both halves of that were
+bugs found in testing: without the counter the mode only applied to monitors
+that started later, and without the poll thread nothing read the control row
+until a tap was requested - a circle that never closed.
+
+**Camb AI** (`providers/camb.py`), base `https://client.camb.ai/apis`, header
+`x-api-key`, `urllib` not `requests` - no new dependency. All three endpoints
+are create/poll/fetch: `POST /transcribe` (multipart, `media_file`) ->
+`GET /transcribe/{task}` -> `GET /transcription-result/{run}`, giving
+`{"transcript":[{"start","end","text","speaker"}]}` in seconds; same shape for
+`/translate` -> `/translation-result/{run}` -> `{"texts":[...]}`. Statuses
+`SUCCESS|PENDING|TIMEOUT|ERROR|PAYMENT_REQUIRED`. **Languages are locale tags
+(`en-us`), the numeric ids are deprecated, and the docs never print the tags** -
+so `/source-languages` is fetched and `LanguageMap` resolves ours against it,
+falling back within a language (`pt-pt` -> `pt-br`) but never across one.
+Upload limit 20 MB.
+
+**Guards, because the failure here is a quiet bill rather than a crash.**
+Daily and per-channel caps on audio sent, seeded from the database at startup
+so a restart does not hand back a fresh day; `PAYMENT_REQUIRED` latches the
+budget shut and says so once; audio below `min_speech_ratio` is never sent (a
+holding clip and a dead channel both look billable and empty to a transcriber);
+a bounded queue that drops the **oldest** segment, because the newest audio is
+the only audio worth captioning. Every failure is a stored row, never a gap.
+
+**Monitoring always wins.** Capture threads only append to a buffer. Measured:
+40 s of audio handed over in under 2 s while the provider was deliberately
+slower than real time, queue bounded, backlog dropped and recorded.
+
+**Audio for upload**: 48 kHz float32 -> 16 kHz 16-bit WAV in memory (`wave`,
+no ffmpeg spawn per segment), scipy-filtered decimation by exactly 3. A 20 s
+segment is ~640 KB. Scaled by 32767, not 32768, so a sample at full scale does
+not wrap to the most negative value.
+
+**Segmentation reuses the QC VAD.** The analyzer's `speech_ratio` tells the
+segmenter where a sentence ended, so finding pauses costs no second pass and no
+second VAD. Hard stop at `segment_max_s`, early close at a pause after
+`segment_min_s`. Added `WindowAnalyzer.elapsed` so captions share the clock the
+measurements use.
+
+**Gotcha, cost a debugging round:** `time.monotonic()` on this Windows host
+ticks at ~15.6 ms, so a fast provider call measured as exactly 0.0. Every
+*reported duration* now uses `time.perf_counter()`; `monotonic` is kept only
+for poll deadlines. Watch for mixing the two in one subtraction.
+
+**Also:** the schema strings are applied one statement at a time, split on the
+statement terminator - so a SQL comment must never contain one. Cost two
+failed runs.
+
+**Page**: `/translate` (`static/translate.html`), same yellow-on-black. Mode
+switch with each mode's consequence spelled out, model cards saying why a model
+cannot be picked (`CAMB_API_KEY is not set`), a budget meter, a "send a test
+segment" probe (speech-shaped noise, not a tone - a tone transcribes as nothing
+and makes a working model look broken), the caption feed side by side, and a
+channel table saying *why* a feed is not being translated.
+
+**Tested**: `tests/test_translate.py`, **128 checks**, including the whole
+adapter against a **fake Camb AI on localhost** - the create/poll/fetch dance,
+retry on 429 and 500, no retry on 402, 401 named as a key problem, job timeout -
+so none of it needs a key or spends a credit.
+
+**Proven on live audio**: shadow mode on live Portuguese commentary produced 5
+captions from 56 s with contiguous timestamps and no drops; then in the
+deployed stack on Ch.41/31/100 at once, with the Greek channel's silent
+stretches correctly refused rather than billed (`dropped_quiet`).
+
+**Configuration**: `.translate.env` (gitignored, dockerignored);
+`.translate.env.example` is committed. The API key comes from the environment
+and nowhere else, so nothing the page can write changes which account is
+billed, and a provider left out of `enabled_providers` cannot be turned on from
+the page at all.
+
+**Left in `shadow` + `mock`** - free, publishes nothing, and `claimed_only` is
+on, so nothing runs until a commentator claims a channel. Switch the provider to
+`camb` once a key is in `.translate.env`.

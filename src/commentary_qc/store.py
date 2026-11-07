@@ -26,6 +26,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from .translate.store import SCHEMA as _TRANSLATE_SCHEMA
+
 log = logging.getLogger(__name__)
 
 _SCHEMA = """
@@ -112,7 +114,7 @@ CREATE TABLE IF NOT EXISTS service (
     last_seen  REAL,
     info       TEXT                        -- JSON
 );
-"""
+""" + _TRANSLATE_SCHEMA
 
 #: A claim older than this is treated as released. A match is at most about
 #: 3.5 hours; a claim still open after 6 was simply never released (someone

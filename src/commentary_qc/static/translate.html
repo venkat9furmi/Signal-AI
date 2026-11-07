@@ -1,0 +1,682 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Translation Console</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%23ffd400'/%3E%3Cpath d='M7 11h8M11 11v12M17 23l4-12 4 12M18.4 19.5h5.2' stroke='%230b0b0c' stroke-width='2.4' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Same yellow-on-black as the commentator page: one strong colour, everything
+   else out of the way, every value painted explicitly because this is read in
+   a dim booth and on a wall screen rather than in a browser whose theme we
+   should follow. Deliberately single-theme. */
+:root{
+  --ground:#0b0b0c; --surface:#151517; --sunk:#101012; --raised:#1c1c20;
+  --line:#2a2a30; --line-2:#3b3b43;
+  --ink:#f7f7f2; --ink-2:#b9b9b1; --dim:#84847b;
+  --yellow:#ffd400; --yellow-ink:#0b0b0c; --yellow-soft:rgba(255,212,0,.13);
+  --amber:#ff9d00; --amber-soft:rgba(255,157,0,.14);
+  --red:#ff4d3d; --red-soft:rgba(255,77,61,.14);
+  --idle:#5e5e57;
+  --shadow:0 1px 0 rgba(0,0,0,.5),0 14px 30px -20px #000;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--ground);color:var(--ink);
+  font:15px/1.5 "IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+.mono{font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace;font-variant-numeric:tabular-nums}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--yellow);outline-offset:2px}
+h1,h2,h3,h4{margin:0;text-wrap:balance}
+.lbl{font-family:"Barlow Condensed","Arial Narrow",sans-serif;font-weight:600;
+  text-transform:uppercase;letter-spacing:.09em;font-size:12px;color:var(--dim)}
+.cond{font-family:"Barlow Condensed","Arial Narrow",sans-serif}
+
+/* ---- frame ---- */
+header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 24px;
+  border-bottom:2px solid var(--yellow);background:#000;position:sticky;top:0;z-index:30}
+.brand{display:flex;align-items:baseline;gap:9px;font-family:"Barlow Condensed",sans-serif;
+  font-weight:700;font-size:22px;letter-spacing:.02em}
+.brand span{background:var(--yellow);color:var(--yellow-ink);padding:4px 8px 3px}
+.spacer{flex:1}
+a.back{color:var(--dim);text-decoration:none;font-size:13px;border-bottom:1px solid var(--line-2);
+  padding-bottom:1px}
+a.back:hover{color:var(--yellow);border-color:var(--yellow)}
+.pill{display:inline-flex;align-items:center;gap:7px;padding:5px 11px;border:1px solid var(--line);
+  border-radius:999px;font-size:12.5px;white-space:nowrap;color:var(--dim);background:var(--sunk)}
+.pill b{font-weight:600;color:var(--ink)}
+.pill i{width:8px;height:8px;border-radius:50%;background:var(--idle);flex:none}
+.pill.ok i{background:var(--yellow);box-shadow:0 0 9px rgba(255,212,0,.8)}
+.pill.warn i{background:var(--amber)}
+.pill.bad i{background:var(--red);box-shadow:0 0 9px rgba(255,77,61,.8)}
+
+main{max-width:1320px;margin:0 auto;padding:22px 24px 72px;display:flex;flex-direction:column;gap:22px}
+section{background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow)}
+.head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;padding:14px 18px;
+  border-bottom:1px solid var(--line)}
+.head h2{font-family:"Barlow Condensed",sans-serif;font-weight:700;font-size:19px;
+  text-transform:uppercase;letter-spacing:.05em}
+.head p{margin:0;font-size:13px;color:var(--dim);flex:1;min-width:200px}
+.body{padding:18px}
+
+/* ---- the mode switch: the most consequential control on the page ---- */
+.modes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--line)}
+.mode{background:var(--sunk);border:0;border-top:3px solid var(--line-2);padding:16px 18px 14px;
+  text-align:left;color:var(--ink);display:flex;flex-direction:column;gap:6px;min-width:0;
+  transition:background .15s,border-color .15s}
+.mode:hover:not(:disabled){background:#17170f}
+.mode:disabled{cursor:not-allowed;opacity:.5}
+.mode .nm{font-family:"Barlow Condensed",sans-serif;font-weight:700;font-size:26px;
+  text-transform:uppercase;letter-spacing:.03em;line-height:1}
+.mode .dt{font-size:12.5px;color:var(--dim);line-height:1.45}
+.mode[aria-pressed="true"]{background:#1b1b12;border-top-color:var(--yellow)}
+.mode[aria-pressed="true"] .nm{color:var(--yellow)}
+.mode[aria-pressed="true"] .dt{color:var(--ink-2)}
+.mode .tag{align-self:flex-start;font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+  font-family:"Barlow Condensed",sans-serif;font-weight:600;padding:2px 7px;border:1px solid var(--line-2);
+  color:var(--dim)}
+.mode[aria-pressed="true"] .tag{border-color:var(--yellow);color:var(--yellow)}
+
+/* ---- model cards ---- */
+.models{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:14px}
+.model{background:var(--sunk);border:1px solid var(--line);padding:14px 16px;
+  display:flex;flex-direction:column;gap:9px}
+.model.on{border-color:var(--yellow);background:#17170f}
+.model .top{display:flex;align-items:center;gap:10px}
+.model h3{font-family:"Barlow Condensed",sans-serif;font-weight:700;font-size:18px;
+  text-transform:uppercase;letter-spacing:.04em;flex:1;min-width:0}
+.model p{margin:0;font-size:12.5px;color:var(--dim);line-height:1.5}
+.cost{font-size:11px;letter-spacing:.08em;text-transform:uppercase;padding:2px 7px;
+  font-family:"Barlow Condensed",sans-serif;font-weight:600}
+.cost.free{background:var(--yellow-soft);color:var(--yellow);border:1px solid rgba(255,212,0,.35)}
+.cost.paid{background:var(--amber-soft);color:var(--amber);border:1px solid rgba(255,157,0,.35)}
+.why{font-size:12px;color:var(--red);background:var(--red-soft);
+  border-left:2px solid var(--red);padding:6px 9px}
+/* A real switch, so "on" and "off" are legible at a glance rather than
+   needing the label to be read. */
+.sw{position:relative;width:46px;height:24px;border-radius:999px;background:var(--raised);
+  border:1px solid var(--line-2);flex:none;transition:background .15s,border-color .15s}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;
+  background:var(--dim);transition:transform .15s,background .15s}
+.model.on .sw{background:var(--yellow-soft);border-color:var(--yellow)}
+.model.on .sw::after{transform:translateX(22px);background:var(--yellow)}
+.sw[disabled]{opacity:.4}
+
+/* ---- numbers ---- */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:1px;background:var(--line)}
+.stat{background:#000;padding:13px 15px 11px;display:flex;flex-direction:column;gap:1px;min-width:0}
+.stat .n{font:700 34px/1 "Barlow Condensed",sans-serif;font-variant-numeric:tabular-nums;
+  color:var(--yellow)}
+.stat .n.quiet{color:var(--ink-2)}
+.stat .n.bad{color:var(--red)}
+.stat .u{font-size:11px;color:var(--dim);letter-spacing:.07em;text-transform:uppercase;
+  font-family:"Barlow Condensed",sans-serif;font-weight:600}
+
+/* ---- budget meter ---- */
+.meter{height:12px;background:var(--sunk);border:1px solid var(--line);position:relative;overflow:hidden}
+.meter .fill{position:absolute;inset:0 auto 0 0;background:var(--yellow);transition:width .4s}
+.meter .fill.warn{background:var(--amber)}
+.meter .fill.bad{background:var(--red)}
+.budget-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+  margin-bottom:7px;flex-wrap:wrap}
+
+/* ---- captions ---- */
+.caps{display:flex;flex-direction:column;gap:1px;background:var(--line)}
+.cap{background:var(--sunk);padding:13px 16px;display:grid;
+  grid-template-columns:118px minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}
+.cap.err{background:#17100f}
+.cap .meta{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--dim)}
+.cap .ch{font-family:"Barlow Condensed",sans-serif;font-weight:700;font-size:17px;
+  color:var(--yellow);letter-spacing:.03em;line-height:1.1}
+.cap .txt{font-size:14.5px;line-height:1.55;min-width:0;overflow-wrap:break-word}
+.cap .txt.src{color:var(--ink-2)}
+.cap .txt .tag{display:block;margin-bottom:3px}
+.cap .fail{grid-column:2/-1;color:var(--red);font-size:13px;line-height:1.5}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:5px}
+.chip{font-size:11px;padding:1px 6px;border:1px solid var(--line-2);color:var(--dim);
+  font-family:"IBM Plex Mono",monospace}
+.chip.shadow{border-color:var(--amber);color:var(--amber)}
+.chip.prod{border-color:var(--yellow);color:var(--yellow)}
+.chip.slow{border-color:var(--red);color:var(--red)}
+
+/* ---- channel table ---- */
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;font-family:"Barlow Condensed",sans-serif;font-weight:600;font-size:12px;
+  text-transform:uppercase;letter-spacing:.08em;color:var(--dim);padding:8px 12px;
+  border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--sunk);vertical-align:top}
+tr.yes td:first-child{box-shadow:inset 3px 0 0 var(--yellow)}
+.tbl-wrap{overflow-x:auto}
+
+/* ---- buttons and form bits ---- */
+.btn{background:var(--yellow);color:var(--yellow-ink);border:0;padding:9px 17px;font-weight:600;
+  font-size:14px}
+.btn:hover{background:#ffe04d}
+.btn:disabled{background:var(--raised);color:var(--dim);cursor:not-allowed}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line-2)}
+.btn.ghost:hover{border-color:var(--yellow);color:var(--yellow);background:transparent}
+select,input[type=text]{background:var(--sunk);border:1px solid var(--line);padding:8px 11px;
+  font-size:14px}
+.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.note{font-size:12.5px;color:var(--dim);line-height:1.5}
+.warnbox{border-left:3px solid var(--amber);background:var(--amber-soft);padding:11px 14px;
+  font-size:13px;line-height:1.55}
+.badbox{border-left:3px solid var(--red);background:var(--red-soft);padding:11px 14px;
+  font-size:13px;line-height:1.55}
+.okbox{border-left:3px solid var(--yellow);background:var(--yellow-soft);padding:11px 14px;
+  font-size:13px;line-height:1.55}
+pre.out{background:#000;border:1px solid var(--line);padding:13px 15px;font-size:12.5px;
+  line-height:1.6;overflow-x:auto;margin:0;white-space:pre-wrap;word-break:break-word}
+.empty{padding:26px 18px;text-align:center;color:var(--dim);font-size:13.5px}
+
+@media (max-width:760px){
+  main{padding:16px 16px 56px}
+  header{padding:12px 16px}
+  .modes{grid-template-columns:1fr}
+  .cap{grid-template-columns:1fr;gap:9px}
+  .cap .fail{grid-column:1}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand"><span>MMC</span> Translation</div>
+  <div class="spacer"></div>
+  <span class="pill" id="p-mode"><i></i><b>—</b></span>
+  <span class="pill" id="p-model"><i></i><b>—</b></span>
+  <span class="pill" id="p-rec"><i></i>recorder</span>
+  <a class="back" href="/">&larr; Commentary QC</a>
+</header>
+
+<main>
+
+<!-- The mode switch comes first because it is the only control here that can
+     start spending money, and the difference between shadow and prod is the
+     whole point of the feature. -->
+<section>
+  <div class="head">
+    <h2>Mode</h2>
+    <p id="mode-sub">Shadow runs the whole pipeline on real commentary and stores every
+      result without showing anybody. Promoting to production is then a switch, not a rewrite.</p>
+  </div>
+  <div class="modes" id="modes"></div>
+  <div class="body" id="mode-note" hidden></div>
+</section>
+
+<section>
+  <div class="head">
+    <h2>Model</h2>
+    <p>One adapter per model. A model the deployment has not enabled cannot be turned
+      on from here &mdash; that gate is in the recorder, not in this page.</p>
+  </div>
+  <div class="body" style="display:flex;flex-direction:column;gap:16px">
+    <div class="models" id="models"></div>
+    <div class="row">
+      <label class="lbl" for="target">Translate into</label>
+      <select id="target"></select>
+      <button class="btn ghost" id="check-langs">Check what this model offers</button>
+      <span class="note" id="lang-note"></span>
+    </div>
+    <div id="lang-out" hidden></div>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <h2>Spending</h2>
+    <p>The guard on the free credits. The pipeline stops at the cap and says so,
+      rather than finding the limit by having the account refused mid&#8209;match.</p>
+  </div>
+  <div class="body" style="display:flex;flex-direction:column;gap:14px">
+    <div>
+      <div class="budget-row">
+        <span class="lbl">Audio sent today</span>
+        <span class="mono" id="budget-text">—</span>
+      </div>
+      <div class="meter"><div class="fill" id="budget-fill" style="width:0"></div></div>
+    </div>
+    <div id="budget-warn" hidden></div>
+    <div class="stats" id="stats"></div>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <h2>Prove it works</h2>
+    <p>Sends one short segment to the selected model and reports exactly what came back.
+      Speech&#8209;shaped noise, not a tone &mdash; a tone transcribes as nothing, which makes a
+      working model look broken.</p>
+  </div>
+  <div class="body" style="display:flex;flex-direction:column;gap:13px">
+    <div class="row">
+      <button class="btn" id="probe">Send a test segment</button>
+      <label class="lbl" for="probe-secs">Seconds</label>
+      <select id="probe-secs">
+        <option>4</option><option selected>6</option><option>10</option><option>20</option>
+      </select>
+      <span class="note" id="probe-note">Costs one segment of credit on a paid model.</span>
+    </div>
+    <pre class="out" id="probe-out" hidden></pre>
+  </div>
+</section>
+
+<section>
+  <div class="head">
+    <h2>Output</h2>
+    <p id="feed-sub">Latest first. What it heard on the left, what it produced on the right.</p>
+    <div class="row">
+      <select id="feed-channel"><option value="">All channels</option></select>
+      <select id="feed-mode">
+        <option value="">Shadow and production</option>
+        <option value="shadow">Shadow only</option>
+        <option value="prod">Production only</option>
+      </select>
+    </div>
+  </div>
+  <div class="caps" id="caps"><div class="empty">Nothing yet.</div></div>
+</section>
+
+<section>
+  <div class="head">
+    <h2>Channels</h2>
+    <p>Which feeds are being translated right now, and why the others are not.
+      The mode can be production and the model healthy while nothing happens,
+      because nobody has claimed a channel.</p>
+  </div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr>
+        <th>Channel</th><th>Language</th><th>Asked for</th><th>Claimed by</th>
+        <th>Translating</th><th>Captions</th><th>Audio sent</th>
+      </tr></thead>
+      <tbody id="chan-rows"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+</main>
+
+<script>
+"use strict";
+
+/* The page holds no state of its own beyond what it last fetched: every
+   control writes to the server and then re-reads. Two processes can change
+   the switch (this page and the recorder's own configuration), so believing
+   a local copy would show a mode that is not running. */
+let STATE = null;
+let PER_CHANNEL = {};
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
+  (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+function fmtAgo(wall, now) {
+  const s = Math.max(0, (now - wall));
+  if (s < 60) return Math.round(s) + "s ago";
+  if (s < 3600) return Math.round(s / 60) + "m ago";
+  return Math.round(s / 3600) + "h ago";
+}
+function num(v, digits = 0) {
+  return (v === null || v === undefined || Number.isNaN(v)) ? "—" : Number(v).toFixed(digits);
+}
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (!r.ok) {
+    let detail = r.status + " " + r.statusText;
+    try { const j = await r.json(); if (j.detail) detail = j.detail; } catch (e) { /* not JSON */ }
+    throw new Error(detail);
+  }
+  return r.json();
+}
+
+/* ---------- header ---------- */
+function paintHeader(s) {
+  const mode = s.mode;
+  const p = $("p-mode");
+  p.className = "pill " + (mode === "prod" ? "ok" : mode === "shadow" ? "warn" : "");
+  p.innerHTML = '<i></i><b>' + esc(mode === "prod" ? "Production"
+    : mode === "shadow" ? "Shadow" : "Off") + '</b>';
+
+  const sel = (s.providers || []).find((x) => x.selected);
+  const pm = $("p-model");
+  pm.className = "pill " + (mode === "off" ? "" : sel && sel.selectable ? "ok" : "bad");
+  pm.innerHTML = '<i></i><b>' + esc(sel ? sel.title : "none") + '</b>';
+
+  const pr = $("p-rec");
+  pr.className = "pill " + (s.recorder_running ? "ok" : "bad");
+  pr.innerHTML = '<i></i>' + (s.recorder_running ? "recorder running" : "recorder stopped");
+}
+
+/* ---------- mode ---------- */
+function paintModes(s) {
+  $("modes").innerHTML = (s.modes || []).map((m) => {
+    const on = m.name === s.mode;
+    const tag = m.name === "off" ? "no cost"
+      : m.name === "shadow" ? "stores, never shows" : "shown to commentators";
+    return '<button class="mode" aria-pressed="' + on + '" data-mode="' + esc(m.name) + '">'
+      + '<span class="tag">' + esc(tag) + '</span>'
+      + '<span class="nm">' + esc(m.title) + '</span>'
+      + '<span class="dt">' + esc(m.detail) + '</span></button>';
+  }).join("");
+  document.querySelectorAll(".mode").forEach((b) => {
+    b.onclick = () => setControl({ mode: b.dataset.mode });
+  });
+}
+
+/* ---------- models ---------- */
+function paintModels(s) {
+  $("models").innerHTML = (s.providers || []).map((p) => {
+    const on = p.selected;
+    return '<div class="model ' + (on ? "on" : "") + '">'
+      + '<div class="top">'
+      +   '<h3>' + esc(p.title) + '</h3>'
+      +   '<span class="cost ' + esc(p.cost) + '">' + esc(p.cost) + '</span>'
+      +   '<button class="sw" data-provider="' + esc(p.name) + '"'
+      +     (p.selectable ? "" : " disabled") + ' role="switch" aria-checked="' + on + '"'
+      +     ' aria-label="Use ' + esc(p.title) + '"></button>'
+      + '</div>'
+      + '<p>' + esc(p.detail) + '</p>'
+      + (p.blocked ? '<div class="why">Cannot be selected: ' + esc(p.blocked) + '</div>' : "")
+      + '</div>';
+  }).join("");
+  document.querySelectorAll(".sw[data-provider]").forEach((b) => {
+    b.onclick = () => setControl({ provider: b.dataset.provider });
+  });
+
+  const t = $("target");
+  if (t.dataset.filled !== "1") {
+    t.innerHTML = (s.languages || []).map((l) =>
+      '<option value="' + esc(l) + '">' + esc(l) + '</option>').join("");
+    t.dataset.filled = "1";
+    t.onchange = () => setControl({ target: t.value });
+  }
+  t.value = s.target_language;
+}
+
+/* ---------- spending ---------- */
+function paintBudget(s) {
+  const b = (s.pipeline && s.pipeline.budget) || {};
+  const spent = b.spent_minutes ?? 0;
+  const cap = b.daily_minutes ?? 0;
+  const frac = cap ? Math.min(1, spent / cap) : 0;
+  $("budget-text").textContent = cap
+    ? num(spent, 1) + " of " + num(cap, 0) + " minutes"
+    : num(spent, 1) + " minutes (no cap set)";
+  const fill = $("budget-fill");
+  fill.style.width = (frac * 100).toFixed(1) + "%";
+  fill.className = "fill" + (frac >= 0.9 ? " bad" : frac >= 0.7 ? " warn" : "");
+
+  const warn = $("budget-warn");
+  if (b.blocked) {
+    warn.hidden = false;
+    warn.className = "badbox";
+    warn.innerHTML = "<b>Stopped spending.</b> " + esc(b.blocked_reason || "")
+      + " Nothing more will be sent until this is cleared.";
+  } else if (frac >= 0.9 && cap) {
+    warn.hidden = false;
+    warn.className = "warnbox";
+    warn.textContent = "Close to the daily cap. Segments will start being skipped.";
+  } else {
+    warn.hidden = true;
+  }
+
+  const sum = s.summary || {};
+  const pipe = s.pipeline || {};
+  const tiles = [
+    ["captions", sum.captions, 0, ""],
+    ["succeeded", sum.ok, 0, ""],
+    ["failed", sum.errors, 0, "bad"],
+    ["skipped", sum.skipped, 0, "quiet"],
+    ["median latency", sum.latency_median_s, 1, "", "s"],
+    ["worst latency", sum.latency_worst_s, 1, "", "s"],
+    ["queued", pipe.queued, 0, "quiet"],
+    ["dropped", pipe.dropped, 0, pipe.dropped ? "bad" : "quiet"],
+  ];
+  $("stats").innerHTML = tiles.map(([label, v, d, cls, unit]) =>
+    '<div class="stat"><span class="n ' + (cls || "") + '">' + esc(num(v, d))
+    + esc(unit || "") + '</span><span class="u">' + esc(label) + '</span></div>').join("");
+}
+
+/* ---------- captions ---------- */
+function paintCaps(rows, now) {
+  const el = $("caps");
+  if (!rows.length) {
+    el.innerHTML = '<div class="empty">No captions in the last three hours.</div>';
+    return;
+  }
+  el.innerHTML = rows.map((r) => {
+    const failed = r.status !== "ok";
+    const chips = [
+      '<span class="chip ' + esc(r.mode) + '">' + esc(r.mode) + '</span>',
+      '<span class="chip">' + esc(r.provider || "?") + '</span>',
+      '<span class="chip">' + num(r.duration_s, 1) + 's audio</span>',
+      '<span class="chip' + (r.latency_s > 15 ? " slow" : "") + '">'
+        + num(r.latency_s, 1) + 's to return</span>',
+    ].join("");
+    const body = failed
+      ? '<div class="fail"><b>' + esc(r.status) + ':</b> ' + esc(r.error || "no reason recorded")
+        + '</div>'
+      : '<div class="txt src"><span class="lbl tag">heard · '
+          + esc(r.source_language || "?") + '</span>'
+          + esc(r.source_text || "— nothing heard —") + '</div>'
+        + '<div class="txt"><span class="lbl tag">produced · '
+          + esc(r.target_language || "?") + '</span>'
+          + esc(r.target_text || "—") + '</div>';
+    return '<div class="cap ' + (failed ? "err" : "") + '">'
+      + '<div class="meta"><span class="ch">' + esc(shortOf(r.channel)) + '</span>'
+      + '<span>' + esc(fmtAgo(r.wall, now)) + '</span>'
+      + '<div class="chips">' + chips + '</div></div>'
+      + body + '</div>';
+  }).join("");
+}
+
+function shortOf(channel) {
+  const m = /(\d+)$/.exec(channel || "");
+  return m ? "Ch." + String(Number(m[1])) : (channel || "?");
+}
+
+/* ---------- channels ---------- */
+function paintChannels(rows) {
+  const tb = $("chan-rows");
+  if (!rows.length) {
+    tb.innerHTML = '<tr><td colspan="7" class="empty">No channels configured.</td></tr>';
+    return;
+  }
+  tb.innerHTML = rows.map((c) => {
+    const seen = PER_CHANNEL[c.channel] || {};
+    return '<tr class="' + (c.eligible ? "yes" : "") + '">'
+      + '<td><b>' + esc(c.short || c.channel) + '</b><br><span class="note">'
+        + esc(c.label || "") + '</span></td>'
+      + '<td>' + esc(c.language || "—") + '</td>'
+      + '<td class="mono">' + esc(c.tag || "—") + '</td>'
+      + '<td>' + esc(c.commentator || (c.claimed ? "claimed" : "—")) + '</td>'
+      + '<td>' + (c.eligible
+          ? '<b style="color:var(--yellow)">yes</b>'
+          : '<span class="note">' + esc(c.why_not || "no") + '</span>') + '</td>'
+      + '<td class="mono">' + esc(seen.n ?? "—") + '</td>'
+      + '<td class="mono">' + (seen.cost ? num(seen.cost / 60, 1) + " min" : "—") + '</td>'
+      + '</tr>';
+  }).join("");
+}
+
+/* ---------- actions ---------- */
+async function setControl(change) {
+  const note = $("mode-note");
+  try {
+    const r = await api("/api/translate/control", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(change),
+    });
+    if (r.note) {
+      note.hidden = false;
+      note.className = "body";
+      note.innerHTML = '<div class="warnbox">' + esc(r.note) + '</div>';
+    } else {
+      note.hidden = true;
+    }
+    await refresh();
+  } catch (e) {
+    note.hidden = false;
+    note.className = "body";
+    note.innerHTML = '<div class="badbox">Could not change it: ' + esc(e.message) + '</div>';
+  }
+}
+
+$("probe").onclick = async () => {
+  const btn = $("probe");
+  const out = $("probe-out");
+  btn.disabled = true;
+  btn.textContent = "Sending…";
+  out.hidden = false;
+  out.textContent = "Waiting for the model…";
+  try {
+    const r = await api("/api/translate/probe", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ seconds: Number($("probe-secs").value) }),
+    });
+    const lines = [];
+    lines.push((r.ok ? "WORKED" : "FAILED") + "  ·  " + r.provider
+      + "  ·  " + num(r.total_latency_s, 2) + "s in total");
+    if (r.health) {
+      lines.push("health: " + JSON.stringify(r.health));
+    }
+    if (r.ok) {
+      lines.push("");
+      lines.push("heard (" + (r.source_language || "?") + "): "
+        + (r.transcript || "— nothing —"));
+      if (r.translation !== undefined) {
+        lines.push("produced (" + r.target + "): " + r.translation);
+      }
+      if (r.utterances && r.utterances.length) {
+        lines.push("");
+        lines.push("segments:");
+        r.utterances.forEach((u) => lines.push("  ["
+          + num(u.start_s, 1) + "–" + num(u.end_s, 1) + "s] " + u.text));
+      }
+      lines.push("");
+      lines.push("transcribe " + num(r.transcribe_latency_s, 2) + "s"
+        + (r.translate_latency_s !== undefined
+            ? ", translate " + num(r.translate_latency_s, 2) + "s" : ""));
+      if (!r.transcript) {
+        lines.push("");
+        lines.push("Note: the model heard nothing in synthetic audio. That is "
+          + "normal and only means the call went through. Accuracy can only be "
+          + "judged on real commentary.");
+      }
+    } else {
+      lines.push("");
+      lines.push(r.error || "no reason given");
+    }
+    out.textContent = lines.join("\n");
+  } catch (e) {
+    out.textContent = "Could not run the test: " + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Send a test segment";
+  }
+};
+
+$("check-langs").onclick = async () => {
+  const btn = $("check-langs");
+  const out = $("lang-out");
+  btn.disabled = true;
+  $("lang-note").textContent = "Asking the model…";
+  try {
+    const r = await api("/api/translate/languages");
+    out.hidden = false;
+    if (!r.ok) {
+      out.className = "badbox";
+      out.textContent = "Could not read the catalogue: " + (r.error || "");
+      $("lang-note").textContent = "";
+      return;
+    }
+    const bad = Object.entries(r.ours || {}).filter(([, v]) => !v.ok);
+    const moved = Object.entries(r.ours || {})
+      .filter(([, v]) => v.ok && v.resolved !== v.want);
+    const parts = [];
+    if (bad.length) {
+      parts.push("<b>Not offered:</b> " + bad.map(([k, v]) =>
+        esc(k) + " (" + esc(v.want) + ")").join(", ")
+        + ". Commentary on those channels cannot be translated by this model.");
+    }
+    if (moved.length) {
+      parts.push("<b>Substituted:</b> " + moved.map(([k, v]) =>
+        esc(k) + " " + esc(v.want) + " &rarr; " + esc(v.resolved)).join(", ") + ".");
+    }
+    if (!parts.length) {
+      parts.push("All six of MMC's languages are offered exactly as asked for.");
+    }
+    out.className = bad.length ? "warnbox" : "okbox";
+    out.innerHTML = parts.join("<br>");
+    $("lang-note").textContent = r.count + " languages offered";
+  } catch (e) {
+    out.hidden = false;
+    out.className = "badbox";
+    out.textContent = "Could not read the catalogue: " + e.message;
+    $("lang-note").textContent = "";
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+/* ---------- refresh ---------- */
+async function refresh() {
+  try {
+    const s = await api("/api/translate/state");
+    STATE = s;
+    PER_CHANNEL = {};
+    (s.per_channel || []).forEach((r) => {
+      const cur = PER_CHANNEL[r.channel] || { n: 0, cost: 0 };
+      cur.n += r.n || 0;
+      cur.cost += r.cost || 0;
+      PER_CHANNEL[r.channel] = cur;
+    });
+    paintHeader(s);
+    paintModes(s);
+    paintModels(s);
+    paintBudget(s);
+
+    const paid = (s.providers || []).find((p) => p.selected && p.cost === "paid");
+    $("probe-note").textContent = paid
+      ? "Costs one segment of credit on " + paid.title + "."
+      : "Free: the selected model makes no network call.";
+
+    const ch = $("feed-channel");
+    const want = ch.value;
+    const names = (s.per_channel || []).map((r) => r.channel);
+    ch.innerHTML = '<option value="">All channels</option>'
+      + [...new Set(names)].sort().map((n) =>
+          '<option value="' + esc(n) + '">' + esc(shortOf(n)) + '</option>').join("");
+    ch.value = want;
+
+    const feed = await api("/api/translate/feed?limit=40&minutes=180"
+      + (ch.value ? "&channel=" + encodeURIComponent(ch.value) : "")
+      + ($("feed-mode").value ? "&mode=" + $("feed-mode").value : ""));
+    paintCaps(feed.captions || [], s.now);
+
+    const el = await api("/api/translate/eligible");
+    paintChannels(el.channels || []);
+  } catch (e) {
+    const pr = $("p-rec");
+    pr.className = "pill bad";
+    pr.innerHTML = '<i></i>cannot reach the server';
+  }
+}
+
+$("feed-channel").onchange = refresh;
+$("feed-mode").onchange = refresh;
+
+refresh();
+setInterval(refresh, 6000);
+</script>
+</body>
+</html>

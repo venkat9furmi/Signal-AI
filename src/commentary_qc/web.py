@@ -45,6 +45,9 @@ from .registry import Registry, default_channels
 from .report import build as build_report
 from .scanner import LiveScanner, describe
 from .store import EventStore
+from .translate import api as translate_api
+from .translate import control as translate_control
+from .translate.settings import TranslateSettings
 
 log = logging.getLogger(__name__)
 
@@ -269,6 +272,14 @@ def create_app(
     # nobody configured can still find and claim it.
     scanner = LiveScanner(settings.source).start()
     feed = FixtureFeed().start()
+
+    # The translation layer's runtime switch rides in the claims file, for the
+    # same reason claims do: this process owns that file, and the recorder only
+    # reads it. One writer per database is the rule that made claim-starts-
+    # monitoring work, so switching models reuses it rather than inventing a
+    # second channel between the two containers.
+    translate_settings = TranslateSettings.from_env()
+    translate_control.ensure(claims_db)
     th = settings.thresholds
     targets = {
         "quiet": th.too_quiet_lufs, "quiet_clear": th.too_quiet_clear_lufs,
@@ -286,7 +297,13 @@ def create_app(
         claims.close()
 
     app = FastAPI(title="Commentary QC", lifespan=lifespan)
+    app.include_router(
+        translate_api.build_router(
+            store, translate_settings, claims_db, registry, claims
+        )
+    )
     page = Path(__file__).parent / "static" / "claim.html"
+    translate_page = Path(__file__).parent / "static" / "translate.html"
 
     @app.middleware("http")
     async def require_passcode(request: Request, call_next):
@@ -436,6 +453,17 @@ def create_app(
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
         return page.read_text(encoding="utf-8")
+
+    @app.get("/translate", response_class=HTMLResponse)
+    def translate_view() -> str:
+        """The translation console: the mode switch, the models and the output.
+
+        A separate page rather than another panel on the commentator view. A
+        commentator on air needs one instruction at a time; whoever is deciding
+        whether a model is good enough needs latency, cost and a side-by-side
+        of every caption. Those are different jobs.
+        """
+        return translate_page.read_text(encoding="utf-8")
 
     @app.get("/api/channels")
     def channels() -> JSONResponse:

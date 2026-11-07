@@ -65,6 +65,9 @@ SLACK_CHANNEL_ID=C...        # the channel alerts go to
 QC_PASSCODE=...              # optional; required before exposing the page
 ```
 
+`.translate.env`, also never committed, for the translation layer &mdash; see
+`.translate.env.example`. With no such file the pipeline starts `off`.
+
 Without the Slack values the system runs normally and alerts appear only on the
 page. Without `QC_PASSCODE` the page has no login, which is fine on localhost
 and not fine anywhere else — claiming a channel starts and stops monitoring.
@@ -86,6 +89,62 @@ per channel. Unknown setting names are rejected at startup rather than ignored.
 **Claims are what scope the system.** MMC's channels cannot be told from other
 providers' by name, number or language, so a claimed channel is an MMC channel
 by definition — and Slack only ever speaks about claimed channels.
+
+## Translation
+
+The audio is already being pulled, decoded and split into speech and gaps for
+the quality rules, so turning it into text costs one more read of a buffer that
+exists anyway. Open <http://127.0.0.1:8642/translate>.
+
+Three modes, and the middle one is the point:
+
+| Mode | What runs | Who sees it | What it costs |
+|---|---|---|---|
+| `off` | nothing &mdash; no tap is installed | &mdash; | nothing |
+| `shadow` | the whole pipeline, on real matches | nobody | the provider's rate, or nothing with the offline model |
+| `prod` | the same pipeline | commentators | the provider's rate |
+
+Shadow mode exists because "it works" and "it is good enough" are different
+questions. What is measured in shadow is exactly what goes live, so promoting
+it is a switch rather than a rewrite &mdash; and with the `mock` provider the
+segmenting, latency and volume can be measured on all 52 channels for nothing.
+
+Switching the mode or the model from the page takes effect within seconds, on
+channels already on air, without restarting the recorder.
+
+**Guards**, because the failure mode here is a quiet bill rather than a crash:
+
+- A hard cap on audio sent per UTC day, and per channel so one stuck feed
+  cannot eat the allowance. The cap is seeded from the database at startup, so
+  a restart does not hand back a fresh day.
+- `PAYMENT_REQUIRED` from the provider stops the pipeline and says so once,
+  instead of filling the log with refusals.
+- Audio that is mostly not speech is never sent. A holding clip, a crowd bed
+  and a dead channel all look alike to a transcriber: billable and empty.
+- A bounded queue. If the provider cannot keep up, the **oldest** segment is
+  dropped &mdash; the newest audio is the only audio worth captioning &mdash;
+  and the drop is stored as a row rather than left as a gap.
+- Monitoring always wins. The capture threads only append to a buffer; nothing
+  in the QC path ever waits on a provider.
+
+Configuration is `.translate.env` (see `.translate.env.example`). The API key
+comes from the environment and nowhere else, so nothing the page can write
+changes which account is billed.
+
+```
+src/commentary_qc/translate/
+  models.py      segments, transcripts, captions, failures - no vendor words
+  settings.py    every knob, validated at startup
+  ports.py       the two capabilities a provider must offer
+  mappers/       vendor JSON <-> our types: pure, no HTTP, unit-tested
+  providers/     one adapter per model, chosen from a registry
+  segmenter.py   cuts at pauses, reusing the QC engine's own VAD
+  budget.py      the guard on the credits
+  control.py     the runtime switch: page writes, recorder reads
+  pipeline.py    the worker and its bounded queue
+  store.py       captions, successes and failures alike
+  api.py         the HTTP surface
+```
 
 ## How it works
 
@@ -110,6 +169,7 @@ python tests/test_dsp.py            # loudness against a reference meter
 python tests/test_engine.py         # rules, hysteresis, escalation, clip veto
 python tests/test_slack_delivery.py # Slack delivery against a fake Slack
 python tests/test_no_commentary.py  # filler detection vs labelled recordings
+python tests/test_translate.py      # translation: mappers, budget, modes, pipeline
 python tools/replay_alerts.py <db>  # replay a night through today's rules
 ```
 
