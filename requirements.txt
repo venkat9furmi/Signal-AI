@@ -1,0 +1,18 @@
+# Audio analysis
+numpy>=1.26
+scipy>=1.11            # streaming filters for K-weighting and decimation
+pyloudnorm>=0.1.1      # reference meter the streaming loudness is checked against
+onnxruntime>=1.17      # Silero VAD v5
+webrtcvad-wheels>=2.0.14   # fallback VAD
+
+# Commentator page
+fastapi>=0.110
+uvicorn>=0.27
+pydantic>=2.6
+python-multipart>=0.0.9   # the sign-in form posts urlencoded data
+
+# Also required, outside pip: ffmpeg (in the Docker image it is installed by
+# the Dockerfile; on Windows set FFMPEG_BIN to its path).
+#
+# Not needed to run the service: playwright was installed once to inspect the
+# vendor's panel by hand and is deliberately not in the image.

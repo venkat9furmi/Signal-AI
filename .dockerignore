@@ -1,0 +1,28 @@
+# Keep the build context small and secrets out of the image.
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# Data and logs belong on the volume, never baked into an image.
+*.db
+*.db-wal
+*.db-shm
+*.log
+*.out
+*.err
+data/
+clips/
+
+# One-off research material
+assessment*/
+tools/__pycache__/
+mod-snapshot.json
+*.aac
+*.mp3
+*.png
+*.har
+
+# Credentials: passed in as environment variables, never copied in.
+.slack.env
+.env

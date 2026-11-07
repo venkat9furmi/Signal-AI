@@ -1,0 +1,35 @@
+{
+  "_comment": [
+    "Scope: MMC does FOOTBALL commentary only. Racing channels (horses-*,",
+    "greyhounds-*) are another provider's output and are listed here disabled,",
+    "purely so nobody re-discovers them and assumes they were missed.",
+    "",
+    "The platform carries ~120 channels; these are the football channels seen",
+    "broadcasting during discovery. NARROW THIS TO MMC'S OWN CHANNELS - some of",
+    "these belong to other providers, and alerting on their commentators is",
+    "noise nobody at MMC can act on.",
+    "",
+    "Claimed channels (picked by a commentator on the web page) are monitored",
+    "too, whether or not they are listed here. This list is only what is watched",
+    "even when nobody has claimed it.",
+    "",
+    "Thresholds live in src/commentary_qc/config.py (set 2026-09-10 from the",
+    "listening tests): quiet below -40 LUFS over a minute (clears above -37),",
+    "loud above -17 (clears below -19), silent below -50.",
+    "'thresholds' here overrides those defaults for one channel only."
+  ],
+  "channels": [
+    { "name": "football-01", "label": "Football Ch.1",  "language": "English",    "enabled": true },
+    { "name": "football-12", "label": "Football Ch.12", "language": "Spanish",    "enabled": true },
+    { "name": "football-13", "label": "Football Ch.13", "language": "Spanish",    "enabled": true },
+    { "name": "football-22", "label": "Football Ch.22", "language": "Italian",    "enabled": true },
+    { "name": "football-23", "label": "Football Ch.23", "language": "Italian",    "enabled": true },
+    { "name": "football-32", "label": "Football Ch.32", "language": "Portuguese", "enabled": true },
+    { "name": "football-52", "label": "Football Ch.52", "language": "Greek",      "enabled": true },
+
+    { "name": "greyhounds-01", "label": "Greyhound Racing", "language": "English", "enabled": false },
+    { "name": "horses-01", "label": "Racing TV (Horses Ch.1)", "language": "English", "enabled": false },
+    { "name": "horses-02", "label": "At The Races (Horses Ch.2)", "language": "English", "enabled": false },
+    { "name": "horses-03", "label": "Irish Horse Racing", "language": "English", "enabled": false }
+  ]
+}

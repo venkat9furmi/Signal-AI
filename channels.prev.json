@@ -1,0 +1,251 @@
+{
+  "_comment": [
+    "MMC channel list, confirmed by the user on 2026-09-15: the 39 football",
+    "channels an MMC account could see in the vendor panel, copied once.",
+    "Previous list is in channels.old.json.",
+    "",
+    "These are watched whenever they broadcast. Claimed channels (picked by a",
+    "commentator on the web page) are monitored too, listed here or not.",
+    "",
+    "Thresholds live in src/commentary_qc/config.py (set 2026-09-10 from the",
+    "listening tests): quiet below -40 LUFS over a minute (clears above -37),",
+    "loud above -17 (clears below -19), silent below -50.",
+    "'thresholds' here overrides those defaults for one channel only."
+  ],
+  "channels": [
+    {
+      "name": "football-21",
+      "label": "Football Ch.21",
+      "language": "Italian",
+      "enabled": true
+    },
+    {
+      "name": "football-22",
+      "label": "Football Ch.22",
+      "language": "Italian",
+      "enabled": true
+    },
+    {
+      "name": "football-23",
+      "label": "Football Ch.23",
+      "language": "Italian",
+      "enabled": true
+    },
+    {
+      "name": "football-24",
+      "label": "Football Ch.24",
+      "language": "Italian",
+      "enabled": true
+    },
+    {
+      "name": "football-25",
+      "label": "Football Ch.25",
+      "language": "Italian",
+      "enabled": true
+    },
+    {
+      "name": "football-26",
+      "label": "Football Ch.26",
+      "language": "Italian",
+      "enabled": true
+    },
+    {
+      "name": "football-27",
+      "label": "Football Ch.27",
+      "language": "Italian",
+      "enabled": true
+    },
+    {
+      "name": "football-28",
+      "label": "Football Ch.28",
+      "language": "Italian",
+      "enabled": true
+    },
+    {
+      "name": "football-29",
+      "label": "Football Ch.29",
+      "language": "Italian",
+      "enabled": true
+    },
+    {
+      "name": "football-31",
+      "label": "Football Ch.31",
+      "language": "Portuguese",
+      "enabled": true
+    },
+    {
+      "name": "football-32",
+      "label": "Football Ch.32",
+      "language": "Portuguese",
+      "enabled": true
+    },
+    {
+      "name": "football-33",
+      "label": "Football Ch.33",
+      "language": "Portuguese",
+      "enabled": true
+    },
+    {
+      "name": "football-34",
+      "label": "Football Ch.34",
+      "language": "Portuguese",
+      "enabled": true
+    },
+    {
+      "name": "football-35",
+      "label": "Football Ch.35",
+      "language": "Portuguese",
+      "enabled": true
+    },
+    {
+      "name": "football-36",
+      "label": "Football Ch.36",
+      "language": "Portuguese",
+      "enabled": true
+    },
+    {
+      "name": "football-37",
+      "label": "Football Ch.37",
+      "language": "Portuguese",
+      "enabled": true
+    },
+    {
+      "name": "football-38",
+      "label": "Football Ch.38",
+      "language": "Portuguese",
+      "enabled": true
+    },
+    {
+      "name": "football-39",
+      "label": "Football Ch.39",
+      "language": "Portuguese",
+      "enabled": true
+    },
+    {
+      "name": "football-41",
+      "label": "Football Ch.41",
+      "language": "German",
+      "enabled": true
+    },
+    {
+      "name": "football-42",
+      "label": "Football Ch.42",
+      "language": "German",
+      "enabled": true
+    },
+    {
+      "name": "football-43",
+      "label": "Football Ch.43",
+      "language": "German",
+      "enabled": true
+    },
+    {
+      "name": "football-44",
+      "label": "Football Ch.44",
+      "language": "German",
+      "enabled": true
+    },
+    {
+      "name": "football-51",
+      "label": "Football Ch.51",
+      "language": "Greek",
+      "enabled": true
+    },
+    {
+      "name": "football-52",
+      "label": "Football Ch.52",
+      "language": "Greek",
+      "enabled": true
+    },
+    {
+      "name": "football-53",
+      "label": "Football Ch.53",
+      "language": "Greek",
+      "enabled": true
+    },
+    {
+      "name": "football-54",
+      "label": "Football Ch.54",
+      "language": "Greek",
+      "enabled": true
+    },
+    {
+      "name": "football-55",
+      "label": "Football Ch.55",
+      "language": "Greek",
+      "enabled": true
+    },
+    {
+      "name": "football-56",
+      "label": "Football Ch.56",
+      "language": "Greek",
+      "enabled": true
+    },
+    {
+      "name": "football-57",
+      "label": "Football Ch.57",
+      "language": "Greek",
+      "enabled": true
+    },
+    {
+      "name": "football-58",
+      "label": "Football Ch.58",
+      "language": "Greek",
+      "enabled": true
+    },
+    {
+      "name": "football-100",
+      "label": "Football Ch.100",
+      "language": "Greek",
+      "enabled": true
+    },
+    {
+      "name": "football-101",
+      "label": "Football Ch.101",
+      "language": "Greek",
+      "enabled": true
+    },
+    {
+      "name": "football-102",
+      "label": "Football Ch.102",
+      "language": "French",
+      "enabled": true
+    },
+    {
+      "name": "football-103",
+      "label": "Football Ch.103",
+      "language": "French",
+      "enabled": true
+    },
+    {
+      "name": "football-104",
+      "label": "Football Ch.104",
+      "language": "French",
+      "enabled": true
+    },
+    {
+      "name": "football-105",
+      "label": "Football Ch.105",
+      "language": "French",
+      "enabled": true
+    },
+    {
+      "name": "football-107",
+      "label": "Football Ch.107",
+      "language": "French",
+      "enabled": true
+    },
+    {
+      "name": "football-108",
+      "label": "Football Ch.108",
+      "language": "French",
+      "enabled": true
+    },
+    {
+      "name": "football-109",
+      "label": "Football Ch.109",
+      "language": "French",
+      "enabled": true
+    }
+  ]
+}

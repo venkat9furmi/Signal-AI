@@ -1,0 +1,22 @@
+{
+  "_comment": [
+    "2026-09-09 listening assessment. Channels chosen to span languages and",
+    "therefore, on past evidence, a wide range of loudness -- the point is to",
+    "collect audio across the whole band so a human can hear where 'too quiet'",
+    "and 'too loud' actually begin.",
+    "",
+    "Audio is saved as well as measured. The platform is live-only, so tonight",
+    "is the only chance to keep it."
+  ],
+  "channels": [
+    { "name": "football-01",  "label": "Football Ch.1",   "language": "English",    "enabled": true },
+    { "name": "football-02",  "label": "Football Ch.2",   "language": "English",    "enabled": true },
+    { "name": "football-11",  "label": "Football Ch.11",  "language": "Spanish",    "enabled": true },
+    { "name": "football-21",  "label": "Football Ch.21",  "language": "Italian",    "enabled": true },
+    { "name": "football-31",  "label": "Football Ch.31",  "language": "Portuguese", "enabled": true },
+    { "name": "football-41",  "label": "Football Ch.41",  "language": "German",     "enabled": true },
+    { "name": "football-52",  "label": "Football Ch.52",  "language": "Greek",      "enabled": true },
+    { "name": "football-102", "label": "Football Ch.102", "language": "French",     "enabled": true },
+    { "name": "cricket-01",   "label": "Cricket Ch.1",    "language": "English",    "enabled": true }
+  ]
+}

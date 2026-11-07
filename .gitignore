@@ -1,0 +1,47 @@
+# --- secrets -----------------------------------------------------------
+# Slack bot token and the page passcode. Never commit this.
+.slack.env
+.env
+
+# --- environments and caches -------------------------------------------
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# --- recorded data ------------------------------------------------------
+# Measurements and claims live in the Docker volume `commentary-qc-data`;
+# snapshots come from `docker compose run --rm backup`. None of it belongs
+# in version control.
+*.db
+*.db-wal
+*.db-shm
+backup/
+data/
+data-test/
+
+# Research material from the September calibration work: 1.7 GB of recorded
+# match audio and the listening-test clips. Kept on disk because the platform
+# is live-only and this audio cannot be recovered - but far too large for git.
+clips/
+assessment*/
+*.aac
+*.mp3
+*.wav
+*.raw
+
+# One-off read of the vendor's control panel (their schedule and channel
+# list). Not secret, but not ours to publish.
+mod-snapshot.json
+
+# --- logs and scratch ---------------------------------------------------
+*.log
+*.out
+*.err
+*.jsonl
+*.har
+*.png
+*.stray-*
+
+# The Silero VAD model (2.3 MB) IS committed on purpose: the Docker build
+# copies it, so leaving it out would make a fresh clone unbuildable.

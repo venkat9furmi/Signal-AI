@@ -1,0 +1,115 @@
+# Commentary QC: the recorder and the commentator page.
+#
+#   docker compose up -d --build     start (or rebuild and restart)
+#   docker compose logs -f recorder  watch it work
+#   docker compose down              stop
+#
+# `restart: unless-stopped` is why this exists: it replaces the Windows
+# watchdog and the scheduled task that needed admin rights. Docker brings both
+# services back after a crash, and after a reboot once Docker Desktop starts.
+
+services:
+  recorder:
+    build: .
+    image: commentary-qc:latest
+    container_name: commentary-qc-recorder
+    restart: unless-stopped
+    # Slack credentials, if present. Without the file the recorder still runs
+    # and alerts still reach the page - Slack simply stays in dry-run.
+    env_file:
+      - path: .slack.env
+        required: false
+    volumes:
+      # A named volume, NOT a host folder. SQLite in WAL mode needs real
+      # shared memory between the writer and its readers, and a Windows bind
+      # mount cannot provide it: on 2026-10-20 the recorder wrote happily into
+      # the WAL while the page read a stale file and reported "recorder
+      # stopped". Inside the volume (Linux filesystem) both see the same data.
+      # Copy a snapshot out with:  docker compose run --rm backup
+      - commentary-qc-data:/data
+      - ./channels.json:/app/channels.json:ro
+    command:
+      - python
+      - -m
+      - commentary_qc.watch
+      - --channels=/app/channels.json
+      - --claims=/data/claims.db
+      - --db=/data/live.db
+      - --log=/data/live.log
+      - --metrics
+      - --prune-days=7
+    stop_grace_period: 20s   # let it mark channels off air and flush the queue
+
+  web:
+    build: .
+    image: commentary-qc:latest
+    container_name: commentary-qc-web
+    restart: unless-stopped
+    # Same secrets file as the recorder. The page uses QC_PASSCODE from it;
+    # empty or absent means no login, which is right while it only listens on
+    # localhost. Set it before exposing the page to a network.
+    env_file:
+      - path: .slack.env
+        required: false
+    depends_on:
+      - recorder
+    ports:
+      # Published on all interfaces: inside the container it must bind 0.0.0.0,
+      # and this is also what lets a commentator reach the page from another
+      # machine once the host allows it.
+      - "8642:8642"
+    volumes:
+      # A named volume, NOT a host folder. SQLite in WAL mode needs real
+      # shared memory between the writer and its readers, and a Windows bind
+      # mount cannot provide it: on 2026-10-20 the recorder wrote happily into
+      # the WAL while the page read a stale file and reported "recorder
+      # stopped". Inside the volume (Linux filesystem) both see the same data.
+      # Copy a snapshot out with:  docker compose run --rm backup
+      - commentary-qc-data:/data
+      - ./channels.json:/app/channels.json:ro
+    command:
+      - python
+      - -m
+      - commentary_qc.web
+      - --db=/data/live.db
+      - --channels=/app/channels.json
+      - --claims-db=/data/claims.db
+      - --host=0.0.0.0
+      - --port=8642
+    healthcheck:
+      # /healthz, not /api/channels: the API needs the passcode once
+      # QC_PASSCODE is set, and a health check must not hold the secret.
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8642/healthz',timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # One-shot: copy a consistent snapshot of the databases to ./backup on the
+  # host. `.backup` is used rather than a file copy because it is safe to run
+  # while the recorder is writing.
+  #   docker compose run --rm backup
+  backup:
+    image: commentary-qc:latest
+    profiles: ["tools"]        # never started by `docker compose up`
+    volumes:
+      - commentary-qc-data:/data:ro
+      - ./backup:/backup
+    entrypoint:
+      - python
+      - -c
+      - |
+        import sqlite3, time, pathlib
+        stamp = time.strftime('%Y%m%d-%H%M%S')
+        out = pathlib.Path('/backup'); out.mkdir(exist_ok=True)
+        for name in ('live.db', 'claims.db'):
+            src = sqlite3.connect(f'file:/data/{name}?mode=ro', uri=True)
+            dst = sqlite3.connect(str(out / f'{name[:-3]}-{stamp}.db'))
+            src.backup(dst); dst.close(); src.close()
+            print('wrote', f'{name[:-3]}-{stamp}.db')
+
+volumes:
+  commentary-qc-data:
+    # Created and populated on 2026-10-20 from the old ./data folder.
+    external: true

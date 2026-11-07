@@ -1,0 +1,913 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MMC Commentary QC</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%23ffd400'/%3E%3Ccircle cx='16' cy='13' r='5' fill='%230b0b0c'/%3E%3Crect x='14.5' y='18' width='3' height='7' fill='%230b0b0c'/%3E%3Crect x='10' y='24' width='12' height='2.5' fill='%230b0b0c'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Yellow on black, like the matchday signage in a stadium tunnel: one strong
+   colour, everything else out of the way. Deliberately single-theme -- this is
+   read in a dim commentary booth and on a producer's wall screen, so every
+   colour is painted explicitly rather than following the viewer's setting. */
+:root{
+  --ground:#0b0b0c; --surface:#151517; --sunk:#101012; --raised:#1c1c20;
+  --line:#2a2a30; --line-2:#3b3b43;
+  --ink:#f7f7f2; --ink-2:#b9b9b1; --dim:#84847b;
+  --yellow:#ffd400; --yellow-ink:#0b0b0c; --yellow-soft:rgba(255,212,0,.13);
+  --amber:#ff9d00; --amber-soft:rgba(255,157,0,.14);
+  --red:#ff4d3d; --red-soft:rgba(255,77,61,.14);
+  --idle:#5e5e57;
+  --shadow:0 1px 0 rgba(0,0,0,.5),0 14px 30px -20px #000;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--ground);color:var(--ink);
+  font:15px/1.5 "IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+.mono{font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace;font-variant-numeric:tabular-nums}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--yellow);outline-offset:2px}
+h1,h2,h3,h4{margin:0;text-wrap:balance}
+.lbl{font-family:"Barlow Condensed","Arial Narrow",sans-serif;font-weight:600;text-transform:uppercase;
+  letter-spacing:.14em;font-size:12.5px;color:var(--dim)}
+.cond{font-family:"Barlow Condensed","Arial Narrow",sans-serif}
+.wrap{max-width:1400px;margin:0 auto;padding:0 24px}
+
+/* ---------------- top bar ---------------- */
+.bar{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:12px 24px;
+  border-bottom:2px solid var(--yellow);background:#000}
+.brand{display:flex;align-items:center;gap:10px}
+.brand .mk{font:700 20px/1 "Barlow Condensed",sans-serif;letter-spacing:.06em;
+  background:var(--yellow);color:var(--yellow-ink);padding:4px 8px 3px}
+.brand .nm{font:600 19px/1 "Barlow Condensed",sans-serif;letter-spacing:.12em;text-transform:uppercase}
+.health{display:flex;gap:8px;flex-wrap:wrap;margin-left:auto}
+.pill{display:inline-flex;align-items:center;gap:7px;padding:4px 11px 4px 9px;border:1px solid var(--line);
+  border-radius:999px;font-size:12.5px;white-space:nowrap;color:var(--dim);background:var(--sunk)}
+.pill b{font-weight:600;color:var(--ink)}
+.pill i{width:8px;height:8px;border-radius:50%;background:var(--idle);flex:none}
+.pill.ok i{background:var(--yellow);box-shadow:0 0 9px rgba(255,212,0,.8)}
+.pill.warn i{background:var(--amber)}
+.pill.bad i{background:var(--red);box-shadow:0 0 9px rgba(255,77,61,.8)}
+.clock{font-size:13px;color:var(--dim);margin-left:auto}
+
+/* ---------------- scoreboard tiles ---------------- */
+.scores{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:1px;background:var(--line);
+  border-bottom:1px solid var(--line)}
+.tile{background:#000;border:0;border-top:3px solid var(--line-2);text-align:left;padding:14px 16px 10px;
+  color:var(--ink);display:flex;flex-direction:column;gap:2px;min-width:0;transition:background .15s}
+.tile:hover{background:#141410}
+.tile[aria-pressed="true"]{background:#1a1a12}
+.tile .n{font:700 44px/1 "Barlow Condensed",sans-serif;font-variant-numeric:tabular-nums;color:var(--yellow)}
+.tile .k{font:600 15px/1.15 "Barlow Condensed",sans-serif;letter-spacing:.09em;text-transform:uppercase}
+.tile .s{font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile.warn{border-top-color:var(--amber)} .tile.warn .n{color:var(--amber)}
+.tile.bad{border-top-color:var(--red)}    .tile.bad .n{color:var(--red)}
+.tile.on{border-top-color:var(--yellow)}
+.tile.zero .n{color:var(--idle)}
+.ticker{padding:10px 24px;font-size:12.5px;color:var(--dim);background:#000;border-bottom:1px solid var(--line)}
+.ticker b{color:var(--ink);font-weight:600}
+
+/* ---------------- matches (main feature) ---------------- */
+.matches{padding:22px 0 6px}
+.mhead{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+.mhead h2{font:700 26px/1 "Barlow Condensed",sans-serif;letter-spacing:.08em;text-transform:uppercase}
+.mhead h2 span{color:var(--yellow)}
+.tabs{display:flex;gap:6px;flex-wrap:wrap}
+.tab{border:1px solid var(--line);background:var(--sunk);color:var(--ink-2);padding:5px 13px;border-radius:999px;
+  font:600 13px/1 "Barlow Condensed",sans-serif;letter-spacing:.09em;text-transform:uppercase}
+.tab[aria-selected="true"]{background:var(--yellow);color:var(--yellow-ink);border-color:var(--yellow)}
+.mhead select{margin-left:auto;background:var(--sunk);border:1px solid var(--line);color:var(--ink);
+  padding:6px 8px;font-size:13px;max-width:210px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:12px}
+.mcard{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--line-2);
+  padding:13px 15px 12px;display:flex;flex-direction:column;gap:7px;box-shadow:var(--shadow)}
+.mcard.live{border-left-color:var(--yellow);background:linear-gradient(180deg,rgba(255,212,0,.07),transparent 60%),var(--surface)}
+.mcard.halftime{border-left-color:var(--amber)}
+.mcard.finished{opacity:.62}
+.mcard .cp{font:600 12px/1 "Barlow Condensed",sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--yellow)}
+.mcard h4{font:600 18px/1.2 "Barlow Condensed",sans-serif;letter-spacing:.02em}
+.mcard .row{display:flex;align-items:baseline;gap:10px}
+.mcard .ko{font-size:13px;color:var(--ink-2)}
+.mcard .sc{margin-left:auto;font:700 20px/1 "Barlow Condensed",sans-serif}
+.mcard .on{font-size:12px;color:var(--yellow)}
+.mcard .use{align-self:flex-start;margin-top:2px;background:transparent;border:1px solid var(--line-2);
+  color:var(--ink-2);padding:4px 10px;font:600 12px/1 "Barlow Condensed",sans-serif;letter-spacing:.1em;
+  text-transform:uppercase}
+.mcard .use:hover{border-color:var(--yellow);color:var(--yellow)}
+.ph{font:600 12px/1 "Barlow Condensed",sans-serif;letter-spacing:.1em;text-transform:uppercase;white-space:nowrap}
+.ph.live{color:var(--yellow)}
+.ph.live::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--yellow);
+  margin-right:6px;vertical-align:1px;animation:blink 2s infinite}
+@keyframes blink{50%{opacity:.35}}
+.ph.halftime{color:var(--amber)} .ph.finished,.ph.off{color:var(--dim)} .ph.upcoming{color:var(--ink-2)}
+.mnote{padding:12px 0 0;font-size:12.5px;color:var(--dim)}
+
+/* ---------------- board ---------------- */
+.work{display:grid;grid-template-columns:minmax(0,1fr) 390px;gap:22px;align-items:start;padding:22px 0 50px}
+.panel{background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow)}
+.chead{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 16px;border-bottom:1px solid var(--line)}
+.chead h2{font:700 22px/1 "Barlow Condensed",sans-serif;letter-spacing:.07em;text-transform:uppercase}
+.filters{display:flex;gap:6px;flex-wrap:wrap}
+.fchip{border:1px solid var(--line);background:transparent;padding:3px 10px;font-size:12.5px;border-radius:999px;
+  color:var(--ink-2);white-space:nowrap}
+.fchip[aria-pressed="true"]{background:var(--yellow);color:var(--yellow-ink);border-color:var(--yellow)}
+.fchip small{opacity:.75;margin-left:3px}
+.search{margin-left:auto;border:1px solid var(--line);background:var(--sunk);padding:6px 10px;width:180px;font-size:13.5px}
+.search::placeholder{color:var(--dim)}
+.rows{display:flex;flex-direction:column;max-height:60vh;overflow-y:auto}
+.row{display:grid;grid-template-columns:4px minmax(92px,.8fr) 148px 82px minmax(0,1.6fr) 120px;gap:14px;
+  align-items:center;padding:10px 16px 10px 0;border:0;border-bottom:1px solid var(--line);background:transparent;
+  text-align:left;width:100%}
+.row:hover{background:#1a1a14}
+.row[aria-selected="true"]{background:#1d1d13;box-shadow:inset 3px 0 0 var(--yellow)}
+.row .stripe{align-self:stretch;background:var(--idle)}
+.row .nm{font:600 18px/1.1 "Barlow Condensed",sans-serif;letter-spacing:.03em}
+.row .lang{display:block;font-size:12px;color:var(--dim)}
+.row .lvl{font-size:13px;color:var(--ink-2);text-align:right}
+.row .lvl small{color:var(--dim);font-size:11px}
+.row .who{font-size:13px;color:var(--ink-2);min-width:0;display:flex;flex-direction:column;gap:1px}
+.row .who>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .who b{color:var(--ink);font-weight:600}
+.row .flt{font:600 13px/1 "Barlow Condensed",sans-serif;letter-spacing:.09em;text-align:right;color:var(--red)}
+.chip{justify-self:start;font:600 12.5px/1 "Barlow Condensed",sans-serif;letter-spacing:.09em;text-transform:uppercase;
+  padding:5px 8px 4px;white-space:nowrap;color:var(--ink-2);background:var(--raised)}
+.s-onair .stripe,.s-dry .stripe{background:var(--yellow)}
+.s-onair .chip,.s-dry .chip{color:var(--yellow);background:var(--yellow-soft)}
+.s-filler .stripe{background:var(--amber)} .s-filler .chip{color:var(--amber);background:var(--amber-soft)}
+.s-silent .stripe,.s-nosignal .stripe{background:var(--red)}
+.s-silent .chip,.s-nosignal .chip{color:var(--red);background:var(--red-soft)}
+.s-starting .stripe,.s-waiting .stripe,.s-checking .stripe{background:var(--line-2)}
+.s-starting .chip,.s-waiting .chip,.s-checking .chip{color:var(--ink-2)}
+.s-down{opacity:.55}
+.empty{padding:22px 16px;color:var(--dim);font-size:14px;list-style:none}
+
+.side{display:flex;flex-direction:column;gap:22px;position:sticky;top:16px}
+.claim{padding:18px}
+.claim h3{font:700 22px/1.1 "Barlow Condensed",sans-serif;letter-spacing:.06em;text-transform:uppercase}
+.claim h3 span{color:var(--yellow)}
+.claim p{margin:8px 0 0;color:var(--ink-2);font-size:14px}
+.claim .meta{display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap}
+.field{display:flex;flex-direction:column;gap:5px;margin-top:14px}
+.field input{border:1px solid var(--line);background:var(--sunk);padding:9px 11px;font-size:15px;width:100%}
+.field input::placeholder{color:var(--dim)}
+.field .hint{font-size:12.5px;color:var(--dim)}
+.go{margin-top:16px;width:100%;padding:13px;border:0;background:var(--yellow);color:var(--yellow-ink);
+  font:700 17px/1 "Barlow Condensed",sans-serif;letter-spacing:.12em;text-transform:uppercase}
+.go:hover{filter:brightness(1.08)}
+.go.take{background:var(--red);color:#fff}
+.go:disabled{opacity:.6;cursor:wait}
+.notice{margin-top:12px;padding:10px 12px;font-size:13.5px;background:var(--amber-soft);color:var(--ink)}
+.picked{margin-top:12px;padding:10px 12px;font-size:13.5px;background:var(--yellow-soft);color:var(--ink)}
+.err{margin-top:10px;font-size:13.5px;color:var(--red)}
+.steps{margin:12px 0 0;padding-left:18px;color:var(--ink-2);font-size:14px}
+.steps li{margin:3px 0}
+.feed h3{font:700 18px/1 "Barlow Condensed",sans-serif;letter-spacing:.09em;text-transform:uppercase;
+  padding:14px 16px;border-bottom:1px solid var(--line)}
+.feed ol{list-style:none;margin:0;padding:0;max-height:36vh;overflow-y:auto}
+.feed li{display:grid;grid-template-columns:auto auto 1fr;gap:4px 10px;padding:9px 16px;
+  border-bottom:1px solid var(--line);font-size:13px}
+.feed li:last-child{border-bottom:0}
+.feed .tm{color:var(--dim);font-size:12px}
+.feed .ch{font:600 14px/1.2 "Barlow Condensed",sans-serif;letter-spacing:.05em}
+.feed .hd{font:600 13px/1.2 "Barlow Condensed",sans-serif;letter-spacing:.08em;color:var(--red)}
+.feed .hd.CLEAR{color:var(--yellow)}
+.feed .hd.soft{color:var(--amber)}
+.feed .ms{grid-column:2 / -1;color:var(--ink-2)}
+.mine{display:flex;align-items:center;gap:12px;padding:10px 16px;background:var(--yellow-soft);
+  border-bottom:1px solid var(--line);font-size:14px}
+.mine button{margin-left:auto;border:0;background:var(--yellow);color:var(--yellow-ink);padding:6px 12px;
+  font:700 14px/1 "Barlow Condensed",sans-serif;letter-spacing:.09em;text-transform:uppercase}
+
+/* ---------------- live deck ---------------- */
+.deck{max-width:1080px;margin:0 auto;padding:22px 24px 50px;display:flex;flex-direction:column;gap:18px}
+.dtop{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.back{border:1px solid var(--line);background:var(--surface);padding:7px 12px;font-size:13.5px;color:var(--ink-2)}
+.ident h1{font:700 30px/1 "Barlow Condensed",sans-serif;letter-spacing:.06em;text-transform:uppercase}
+.ident p{margin:4px 0 0;color:var(--ink-2);font-size:14px}
+.tally{margin-left:auto;display:flex;align-items:center;gap:8px;padding:6px 14px;border:1px solid var(--line);
+  background:var(--surface);font:700 14px/1 "Barlow Condensed",sans-serif;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--dim)}
+.tally i{width:10px;height:10px;border-radius:50%;background:var(--idle)}
+.tally.on{color:var(--yellow);border-color:var(--yellow)}
+.tally.on i{background:var(--yellow);box-shadow:0 0 12px var(--yellow)}
+.mstrip{display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:13px 18px;border-left:4px solid var(--yellow)}
+.mstrip .nm{font:600 20px/1.1 "Barlow Condensed",sans-serif;letter-spacing:.03em}
+.mstrip .cp{font-size:13px;color:var(--dim)}
+.mstrip .sc{font:700 24px/1 "Barlow Condensed",sans-serif;margin-left:auto}
+.verdict{display:flex;gap:20px;align-items:center;padding:24px 26px;border-left:8px solid var(--vc,var(--idle))}
+.verdict h2{font:700 44px/1 "Barlow Condensed",sans-serif;letter-spacing:.04em;color:var(--vc,var(--ink))}
+.verdict p{margin:6px 0 0;font-size:17px;color:var(--ink-2)}
+.verdict.good{--vc:var(--yellow)} .verdict.warn{--vc:var(--amber)} .verdict.bad{--vc:var(--red)}
+.verdict.wait{--vc:var(--line-2)} .verdict.unknown{--vc:var(--idle)}
+.dgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px}
+.pad{padding:16px 18px}
+.phead{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:10px}
+.big{font:700 34px/1 "Barlow Condensed",sans-serif;font-variant-numeric:tabular-nums}
+.big small{font:500 14px "IBM Plex Sans",sans-serif;color:var(--dim);margin-left:4px}
+svg{display:block;width:100%;height:auto}
+svg text{font-family:"IBM Plex Mono",monospace;font-size:10.5px;fill:var(--dim)}
+.m-track{fill:var(--sunk);stroke:var(--line)}
+.m-zone{fill:var(--yellow-soft)}
+.m-bar{fill:var(--yellow)} .m-bar.lo{fill:var(--amber)} .m-bar.hi{fill:var(--red)}
+.m-tick{stroke:var(--line-2)} .m-target{stroke:var(--yellow);stroke-dasharray:3 3}
+.m-needle{stroke:var(--ink);stroke-width:2} .m-now{fill:var(--ink-2)}
+.c-grid{stroke:var(--line)} .c-band{fill:var(--yellow-soft)}
+.c-target{stroke:var(--yellow);stroke-dasharray:4 4}
+.c-short{fill:none;stroke:var(--line-2);stroke-width:1}
+.c-min{fill:none;stroke:var(--yellow);stroke-width:2.2;stroke-linejoin:round}
+.c-dot{fill:var(--yellow)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--dim);margin-top:6px}
+.legend i{display:inline-block;width:14px;height:3px;vertical-align:middle;margin-right:5px;background:var(--yellow)}
+.legend i.s{background:var(--line-2);height:1px}
+.cells{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line)}
+.cell{background:var(--surface);padding:12px 14px;display:flex;flex-direction:column;gap:2px}
+.cell .v{font:600 22px/1.1 "Barlow Condensed",sans-serif;font-variant-numeric:tabular-nums}
+.cell .v.ok{color:var(--yellow)} .cell .v.no{color:var(--red)} .cell .v.mid{color:var(--amber)}
+.cell .h{font-size:12px;color:var(--dim)}
+.log .row2{display:grid;grid-template-columns:auto auto 1fr;gap:12px;padding:8px 18px;border-top:1px solid var(--line);
+  font-size:13.5px}
+.log .row2 .tm{color:var(--dim);font-size:12.5px}
+.log .row2 .ev{font:600 13px/1.3 "Barlow Condensed",sans-serif;letter-spacing:.09em}
+.log .row2 .ev.FIRE{color:var(--red)} .log .row2 .ev.ESCALATE{color:var(--red)} .log .row2 .ev.CLEAR{color:var(--yellow)}
+.dfoot{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;color:var(--dim);font-size:13.5px}
+.dfoot .acts{display:flex;gap:10px}
+.off{border:1px solid var(--line);background:var(--surface);padding:9px 16px;font:600 14px/1 "Barlow Condensed",sans-serif;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--ink-2)}
+.off:hover{border-color:var(--red);color:var(--red)}
+.rep{border:1px solid var(--yellow);background:transparent;color:var(--yellow);padding:9px 16px;
+  font:600 14px/1 "Barlow Condensed",sans-serif;letter-spacing:.12em;text-transform:uppercase}
+.rep:hover{background:var(--yellow-soft)}
+
+/* ---------------- report ---------------- */
+.report{padding:18px}
+.report h3{font:700 22px/1 "Barlow Condensed",sans-serif;letter-spacing:.07em;text-transform:uppercase}
+.report h3 span{color:var(--yellow)}
+.rgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--line);
+  border:1px solid var(--line);margin-top:14px}
+.rcell{background:var(--surface);padding:12px 14px;display:flex;flex-direction:column;gap:2px}
+.rcell .v{font:700 24px/1.05 "Barlow Condensed",sans-serif;font-variant-numeric:tabular-nums}
+.rcell .v.ok{color:var(--yellow)} .rcell .v.no{color:var(--red)} .rcell .v.mid{color:var(--amber)}
+.rcell .h{font-size:12px;color:var(--dim)}
+.rlist{list-style:none;margin:14px 0 0;padding:0;border-top:1px solid var(--line)}
+.rlist li{display:grid;grid-template-columns:120px 1fr auto;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);
+  font-size:13.5px}
+.rlist .rl{font:600 13px/1.3 "Barlow Condensed",sans-serif;letter-spacing:.08em;color:var(--red)}
+.rlist .rl.soft{color:var(--amber)}
+.rlist .rs{color:var(--ink-2)}
+.rlist .rd{color:var(--dim);white-space:nowrap}
+
+@media (max-width:1150px){
+  .scores{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .work{grid-template-columns:minmax(0,1fr)}
+  .side{position:static}
+}
+@media (max-width:720px){
+  .scores{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .row{grid-template-columns:4px minmax(0,1fr) auto;gap:4px 12px}
+  .row .lvl,.row .who,.row .flt{grid-column:2 / -1;text-align:left}
+  .dgrid{grid-template-columns:minmax(0,1fr)}
+  .cells{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .verdict h2{font-size:34px}
+  .search{margin-left:0;width:100%}
+  .wrap{padding:0 14px}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="brand"><span class="mk">MMC</span><span class="nm">Commentary QC</span></div>
+  <div class="health" aria-label="System health">
+    <span class="pill" id="hRec"><i></i><b>Recorder</b><span>checking…</span></span>
+    <span class="pill" id="hScan"><i></i><b>Streams</b><span>scanning…</span></span>
+    <span class="pill" id="hFix"><i></i><b>Match times</b><span>loading…</span></span>
+    <span class="pill" id="hSlack"><i></i><b>Slack</b><span>—</span></span>
+  </div>
+  <span class="clock mono" id="clock"></span>
+</header>
+
+<div class="scores" id="scores" role="group" aria-label="Right now">
+  <button class="tile on" data-filter="live"><span class="n" id="nLive">–</span><span class="k">Commentary live</span><span class="s">voice going out now</span></button>
+  <button class="tile warn" data-filter="filler"><span class="n" id="nLoop">–</span><span class="k">Holding clip</span><span class="s">pre-match, half-time or stuck</span></button>
+  <button class="tile bad" data-filter="silent"><span class="n" id="nSilent">–</span><span class="k">Silent / no signal</span><span class="s">stream up, nothing heard</span></button>
+  <button class="tile bad" data-filter="faults"><span class="n" id="nFaults">–</span><span class="k">Faults now</span><span class="s">need a commentator's action</span></button>
+  <button class="tile on" data-filter="claimed"><span class="n" id="nClaimed">–</span><span class="k">Claimed</span><span class="s">by MMC commentators</span></button>
+  <button class="tile on" data-action="matches"><span class="n" id="nMatches">–</span><span class="k">Matches live</span><span class="s" id="nextMatch">in MMC's competitions</span></button>
+</div>
+<div class="ticker" id="ticker">Connecting to the QC server…</div>
+
+<main id="board">
+  <!-- ============ matches: the main event ============ -->
+  <section class="wrap matches" id="matchesPanel" aria-labelledby="mTitle">
+    <div class="mhead">
+      <h2 id="mTitle">Matches <span id="mCount"></span></h2>
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" data-tab="live" aria-selected="true">Live now</button>
+        <button class="tab" role="tab" data-tab="today" aria-selected="false">Today</button>
+        <button class="tab" role="tab" data-tab="tomorrow" aria-selected="false">Tomorrow</button>
+        <button class="tab" role="tab" data-tab="week" aria-selected="false">Next 7 days</button>
+      </div>
+      <select id="mComp" aria-label="Competition"><option value="">All competitions</option></select>
+    </div>
+    <div class="cards" id="mCards"><div class="empty">Loading match times…</div></div>
+    <p class="mnote" id="mNote">Times are your local time. Pick a match here, then choose the channel you are commentating on.</p>
+  </section>
+
+  <!-- ============ channels + claim ============ -->
+  <div class="wrap work">
+    <section class="panel" aria-labelledby="chTitle">
+      <div class="mine" id="mine" hidden></div>
+      <div class="chead">
+        <h2 id="chTitle">MMC channels</h2>
+        <div class="filters" id="filters">
+          <button class="fchip" data-filter="all" aria-pressed="true">On air</button>
+          <button class="fchip" data-filter="live" aria-pressed="false">Live</button>
+          <button class="fchip" data-filter="filler" aria-pressed="false">Holding clip</button>
+          <button class="fchip" data-filter="faults" aria-pressed="false">Faults</button>
+          <button class="fchip" data-filter="claimed" aria-pressed="false">Claimed</button>
+          <button class="fchip" data-filter="stopped" aria-pressed="false">Stopped<small id="cStopped"></small></button>
+          <button class="fchip" data-filter="others" aria-pressed="false">Other providers<small id="cOthers"></small></button>
+        </div>
+        <input class="search" id="search" type="search" placeholder="Find: 21, Italian, Marco" aria-label="Find a channel">
+      </div>
+      <div class="rows" id="rows" role="listbox" aria-label="Channels"><div class="empty">Loading channels…</div></div>
+    </section>
+
+    <aside class="side">
+      <section class="panel claim" id="claimBox" aria-live="polite"></section>
+      <section class="panel feed">
+        <h3>Latest alerts</h3>
+        <ol id="feed"><li class="empty">Nothing yet.</li></ol>
+      </section>
+    </aside>
+  </div>
+</main>
+
+<!-- ============ live deck ============ -->
+<main class="deck" id="deck" hidden>
+  <div class="dtop">
+    <button class="back" id="backBtn">← All channels</button>
+    <div class="ident"><h1 id="dName">—</h1><p id="dSub">—</p></div>
+    <span class="tally" id="tally"><i></i><span id="tallyTxt">Off air</span></span>
+  </div>
+
+  <section class="panel mstrip" id="dMatch" hidden></section>
+
+  <section class="panel verdict unknown" id="verdict" aria-live="polite">
+    <div><h2 id="vHead">CONNECTING</h2><p id="vAct">Reading your channel…</p></div>
+  </section>
+
+  <div class="dgrid">
+    <section class="panel pad">
+      <div class="phead"><span class="lbl">Loudness · last minute</span><span class="big" id="lufsNow">—<small>LUFS</small></span></div>
+      <svg viewBox="0 0 520 74" role="img" aria-label="Loudness meter">
+        <rect class="m-track" x="0" y="18" width="520" height="24"/>
+        <rect class="m-zone" id="mZone" x="0" y="18" width="0" height="24"/>
+        <rect class="m-bar" id="mBar" x="0" y="22" width="0" height="16"/>
+        <line class="m-tick" id="mQ" x1="0" y1="12" x2="0" y2="48"/>
+        <line class="m-tick" id="mL" x1="0" y1="12" x2="0" y2="48"/>
+        <line class="m-target" id="mT" x1="0" y1="14" x2="0" y2="46"/>
+        <rect class="m-now" id="mNow" x="0" y="42" width="3" height="7"/>
+        <line class="m-needle" id="mNeedle" x1="0" y1="10" x2="0" y2="50"/>
+        <text x="1" y="64">-50</text>
+        <text id="tQ" x="0" y="64" text-anchor="middle">-40</text>
+        <text id="tL" x="0" y="64" text-anchor="middle">-17</text>
+        <text x="519" y="64" text-anchor="end">0</text>
+        <text id="tZone" x="0" y="9" text-anchor="middle">OK RANGE</text>
+      </svg>
+      <p class="legend" style="margin:6px 0 0">Needle: last minute (what alerts judge) · small mark: last 3 seconds</p>
+    </section>
+    <section class="panel pad">
+      <div class="phead"><span class="lbl">Last 10 minutes</span></div>
+      <svg viewBox="0 0 520 150" id="trend" role="img" aria-label="Loudness over the last ten minutes"></svg>
+      <div class="legend"><span><i></i>last minute</span><span><i class="s"></i>3-second level</span><span>shaded: OK range</span></div>
+    </section>
+  </div>
+
+  <div class="cells">
+    <div class="cell"><span class="lbl">Voice over crowd</span><span class="v" id="cBal">—</span><span class="h">aim for 6 dB or more</span></div>
+    <div class="cell"><span class="lbl">Peak</span><span class="v" id="cPeak">—</span><span class="h">must stay under -1 dBTP</span></div>
+    <div class="cell"><span class="lbl">You are talking</span><span class="v" id="cTalk">—</span><span class="h">share of the last second</span></div>
+    <div class="cell"><span class="lbl">Crowd bed</span><span class="v" id="cCrowd">—</span><span class="h">crowd sound behind you</span></div>
+  </div>
+
+  <section class="panel log" id="log"><div class="pad lbl">This session</div><div class="empty">No alerts yet this session.</div></section>
+  <section class="panel report" id="report" hidden></section>
+
+  <div class="dfoot">
+    <span>We hear what listeners hear, about 10 seconds behind you.</span>
+    <span class="acts">
+      <button class="rep" id="repBtn">Match report</button>
+      <button class="off" id="offBtn">Stop monitoring</button>
+    </span>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = (v, d = 1) => (v === null || v === undefined || !isFinite(v)) ? "—" : Number(v).toFixed(d);
+const hhmm = t => new Date(t * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+const hhmmss = t => new Date(t * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
+const ago = s => s < 60 ? `${Math.round(s)} s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`;
+const mins = s => s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`
+  : s >= 60 ? `${Math.round(s / 60)} min` : `${Math.round(s)} s`;
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} },
+};
+
+let DATA = null, filter = "all", query = "", selected = null, pendingMatch = null;
+let mine = store.get("qc_claim"), view = "board", mtab = "live", mcomp = "";
+let deckTimer = null, trendTimer = null;
+const MATCH_BY_LABEL = new Map();
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const d = body.detail;
+    const e = new Error(typeof d === "string" ? d : (d && d.message) || r.statusText);
+    e.status = r.status; e.detail = d; throw e;
+  }
+  return body;
+}
+const post = (path, data) => api(path, {method: "POST",
+  headers: {"Content-Type": "application/json"}, body: JSON.stringify(data)});
+
+/* ---------------- matches ---------------- */
+function dayDiff(t) {
+  const d = new Date(t * 1000), n = new Date();
+  const day = a => new Date(a.getFullYear(), a.getMonth(), a.getDate()).getTime();
+  return Math.round((day(d) - day(n)) / 86400000);
+}
+function dayLabel(t) {
+  const diff = dayDiff(t);
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Tomorrow";
+  if (diff === -1) return "Yesterday";
+  return new Date(t * 1000).toLocaleDateString([], {weekday: "short", day: "numeric", month: "short"});
+}
+function phaseMark(m) {
+  if (!m) return "";
+  if (m.phase === "live") return `<span class="ph live">Live ${esc(m.detail || "")}</span>`;
+  if (m.phase === "halftime") return `<span class="ph halftime">Half-time</span>`;
+  if (m.phase === "finished") return `<span class="ph finished">Full time</span>`;
+  if (m.phase === "off") return `<span class="ph off">Postponed</span>`;
+  return `<span class="ph upcoming">${esc(dayLabel(m.kickoff))} ${hhmm(m.kickoff)}</span>`;
+}
+const scoreOf = m => (m && m.home_score != null && m.phase !== "upcoming") ? `${esc(m.home_score)}–${esc(m.away_score)}` : "";
+const matchLabel = m => `${m.name} — ${m.competition}, ${dayLabel(m.kickoff)} ${hhmm(m.kickoff)}`;
+const allMatches = () => DATA ? [...DATA.matches.live, ...DATA.matches.upcoming, ...DATA.matches.recent] : [];
+
+function tabMatches() {
+  const M = DATA.matches;
+  const by = list => list.filter(m => !mcomp || m.competition === mcomp);
+  if (mtab === "live") return by([...M.live, ...M.recent]);
+  if (mtab === "today") return by(M.upcoming.filter(m => dayDiff(m.kickoff) === 0));
+  if (mtab === "tomorrow") return by(M.upcoming.filter(m => dayDiff(m.kickoff) === 1));
+  return by(M.upcoming);
+}
+
+function card(m) {
+  return `<article class="mcard ${esc(m.phase)}">
+    <div class="row"><span class="cp">${esc(m.competition)}</span></div>
+    <h4>${esc(m.name)}</h4>
+    <div class="row"><span class="ko mono">${esc(dayLabel(m.kickoff))} ${hhmm(m.kickoff)}</span>
+      ${phaseMark(m)}<span class="sc mono">${scoreOf(m)}</span></div>
+    ${m.claimed ? `<div class="on">on ${esc(m.claimed.short)}${m.claimed.commentator ? " · " + esc(m.claimed.commentator) : ""}</div>` : ""}
+    <button class="use" data-id="${esc(m.id)}">Use this match</button>
+  </article>`;
+}
+
+function renderMatches() {
+  const M = DATA.matches;
+  const comps = [...new Set(allMatches().map(m => m.competition))].sort();
+  const sel = $("mComp");
+  if (sel.options.length - 1 !== comps.length) {
+    sel.innerHTML = '<option value="">All competitions</option>' +
+      comps.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+    sel.value = comps.includes(mcomp) ? mcomp : "";
+  }
+  document.querySelectorAll(".tab").forEach(t => t.setAttribute("aria-selected", String(t.dataset.tab === mtab)));
+  const list = tabMatches();
+  $("mCount").textContent = list.length ? `· ${list.length}` : "";
+  if (!allMatches().length && !M.health.ok) {
+    $("mCards").innerHTML = '<div class="empty">Match times are unavailable right now.</div>';
+  } else if (!list.length) {
+    const next = M.upcoming[0];
+    $("mCards").innerHTML = `<div class="empty">${mtab === "live"
+      ? `No match in progress.${next ? ` Next: ${esc(next.name)}, ${esc(dayLabel(next.kickoff))} ${hhmm(next.kickoff)}.` : ""}`
+      : "Nothing scheduled in this window."}</div>`;
+  } else {
+    $("mCards").innerHTML = list.map(card).join("");
+    $("mCards").querySelectorAll(".use").forEach(b => b.onclick = () => pickMatch(b.dataset.id));
+  }
+}
+
+function pickMatch(id) {
+  const m = allMatches().find(x => x.id === id);
+  if (!m) return;
+  pendingMatch = id;
+  const fx = $("fx");
+  if (fx) { fx.value = matchLabel(m); fx.focus(); }
+  else { renderClaimBox(); $("claimBox").scrollIntoView({behavior: "smooth", block: "center"}); }
+}
+
+/* ---------------- board ---------------- */
+const LIVE = ["onair", "dry"], QUIET = ["silent", "nosignal"];
+function matches(c) {
+  if (query) {
+    const hay = [c.short, c.label, c.language, c.claim?.commentator, c.claim?.fixture, c.channel]
+      .join(" ").toLowerCase();
+    return query.split(/\s+/).every(q => hay.includes(q));
+  }
+  switch (filter) {
+    case "all": return c.mmc && c.state !== "down";
+    case "live": return c.mmc && LIVE.includes(c.state);
+    case "filler": return c.mmc && c.state === "filler";
+    case "silent": return c.mmc && QUIET.includes(c.state);
+    case "faults": return c.mmc && !!c.fault;
+    case "claimed": return !!c.claim;
+    case "stopped": return c.mmc && c.state === "down";
+    case "others": return !c.mmc && c.broadcasting;
+  }
+  return true;
+}
+
+function pill(id, cls, text) { const p = $(id); p.className = "pill " + cls; p.lastElementChild.textContent = text; }
+
+function renderHealth(s, now) {
+  const r = s.recorder;
+  if (r.running) pill("hRec", "ok", `running since ${hhmm(r.since)} · ${r.monitoring.length} channels`);
+  else if (r.seen) pill("hRec", "bad", `stopped ${ago(now - r.last_seen)} — no alerts`);
+  else pill("hRec", "bad", "not running — no alerts");
+
+  const sc = s.scan;
+  if (!sc.checked_at) pill("hScan", "", "scanning…");
+  else if (!sc.ok) pill("hScan", "bad", `can't reach streams (${sc.errors}/${sc.probed} failed)`);
+  else pill("hScan", "ok", `${s.mmc_broadcasting} of MMC's up · ${ago(now - sc.checked_at)}`);
+
+  const fh = DATA.matches.health;
+  if (!fh.checked_at) pill("hFix", "", "loading…");
+  else if (!fh.ok) pill("hFix", "bad", "unavailable");
+  else pill("hFix", "ok", `updated ${ago(now - fh.checked_at)}`);
+
+  const sl = r.slack;
+  if (sl === "bot" || sl === "webhook") pill("hSlack", "ok", "connected");
+  else if (sl === "dry-run") pill("hSlack", "warn", "not connected — page only");
+  else pill("hSlack", "", "unknown");
+}
+
+function renderScores(s) {
+  const st = s.states || {};
+  const n = k => k.reduce((a, x) => a + (st[x] || 0), 0);
+  const set = (id, v) => { $(id).textContent = v; $(id).parentElement.classList.toggle("zero", !v); };
+  set("nLive", n(LIVE)); set("nLoop", n(["filler"])); set("nSilent", n(QUIET));
+  set("nFaults", s.faults); set("nClaimed", s.claimed); set("nMatches", s.matches_live);
+  const nx = s.next_match;
+  $("nextMatch").textContent = nx ? `next ${dayLabel(nx.kickoff)} ${hhmm(nx.kickoff)} · ${nx.name}` : "in MMC's competitions";
+  document.querySelectorAll("[data-filter]").forEach(b =>
+    b.setAttribute("aria-pressed", String(!query && b.dataset.filter === filter)));
+  $("cStopped").textContent = st.down ? ` ${st.down}` : "";
+  $("cOthers").textContent = s.others ? ` ${s.others}` : "";
+  $("ticker").innerHTML = `<b>${s.mmc_broadcasting}</b> of MMC's channels broadcasting · <b>${s.measured}</b> being measured` +
+    ` · page refreshes every 5 s · last update ${hhmmss(DATA.now)}`;
+}
+
+function rowHtml(c) {
+  const m = c.metric, cl = c.claim, mt = cl && cl.match;
+  const lvl = m ? `${fmt(m.lufs_minute ?? m.lufs_short)} <small>LUFS</small>` : "";
+  let who = "";
+  if (cl) {
+    who = `<span><b>${esc(cl.commentator || "Claimed")}</b>${!mt && cl.fixture ? " · " + esc(cl.fixture) : ""}</span>`;
+    if (mt) who += `<span>${esc(mt.name)} · ${phaseMark(mt)} <span class="mono">${scoreOf(mt)}</span></span>`;
+  }
+  const fault = c.fault && c.state !== "filler" ? esc(c.fault) : "";
+  return `<button class="row s-${c.state}" role="option" data-ch="${esc(c.channel)}"
+      aria-selected="${c.channel === selected}">
+    <span class="stripe"></span>
+    <span><span class="nm">${esc(c.short)}</span><span class="lang">${esc(c.language || c.label)}</span></span>
+    <span class="chip">${esc(c.state_label)}</span>
+    <span class="lvl mono">${lvl}</span>
+    <span class="who">${who}</span>
+    <span class="flt">${fault}</span>
+  </button>`;
+}
+
+function renderRows() {
+  const rows = DATA.channels.filter(matches);
+  const empty = query ? "No channel matches."
+    : filter === "all" ? "None of MMC's channels is broadcasting right now."
+    : filter === "others" ? "No other providers' channels are broadcasting." : "No channel in this group.";
+  $("rows").innerHTML = rows.length ? rows.map(rowHtml).join("") : `<div class="empty">${empty}</div>`;
+  $("rows").querySelectorAll(".row").forEach(b => b.onclick = () => select(b.dataset.ch));
+}
+
+function renderFeed() {
+  const f = DATA.feed.filter(a => a.rule !== "no_crowd").slice(0, 14);
+  $("feed").innerHTML = f.length ? f.map(a => `<li>
+      <span class="tm mono">${hhmm(a.wall)}</span><span class="ch">${esc(a.short)}</span>
+      <span class="hd ${a.event}${a.rule === "filler_playing" ? " soft" : ""}">${
+        a.event === "CLEAR" ? "RESOLVED · " + esc(a.headline)
+        : a.event === "ESCALATE" ? "WORSE · " + esc(a.headline) : esc(a.headline)}</span>
+      <span class="ms">${esc(a.message)}</span></li>`).join("")
+    : '<li class="empty">No alerts yet.</li>';
+}
+
+function renderMine() {
+  const c = mine && DATA.channels.find(x => x.channel === mine);
+  if (!c || !c.claim) { $("mine").hidden = true; return; }
+  $("mine").hidden = false;
+  $("mine").innerHTML = `<span>You are monitoring <b>${esc(c.label)}</b> — ${esc(c.state_label.toLowerCase())}</span>
+    <button id="openMine">Open my channel</button>`;
+  $("openMine").onclick = () => openDeck(mine);
+}
+
+function refreshMatchOptions() {
+  MATCH_BY_LABEL.clear();
+  const soon = DATA.now + 36 * 3600;
+  const opts = allMatches().filter(m => m.phase !== "finished" && m.kickoff <= soon);
+  for (const m of opts) MATCH_BY_LABEL.set(matchLabel(m), m.id);
+  return opts.map(m => `<option value="${esc(matchLabel(m))}"></option>`).join("");
+}
+
+function renderClaimBox() {
+  const box = $("claimBox");
+  const c = selected && DATA.channels.find(x => x.channel === selected);
+  const pm = pendingMatch && allMatches().find(m => m.id === pendingMatch);
+  if (!c) {
+    box.innerHTML = `<h3>Which channel <span>are you on?</span></h3>
+      <ol class="steps"><li>Pick your match above.</li>
+      <li>Click your channel in the list.</li>
+      <li>Add your name and start — we listen within seconds.</li></ol>
+      ${pm ? `<div class="picked">Match picked: <b>${esc(pm.name)}</b>. Now click your channel.</div>` : ""}`;
+    delete box.dataset.ch;
+    return;
+  }
+  const typing = box.dataset.ch === c.channel && $("fx");
+  const fx = typing ? $("fx").value : (pm ? matchLabel(pm) : (c.claim?.fixture || ""));
+  const nm = typing ? $("nm").value : (store.get("qc_name") || "");
+  const other = c.claim && c.channel !== mine;
+  const reading = c.metric ? `<span class="mono" style="font-size:13px;color:var(--ink-2)">${fmt(c.metric.lufs_minute)} LUFS</span>` : "";
+  const focused = document.activeElement && document.activeElement.id;
+  box.dataset.ch = c.channel;
+  box.innerHTML = `<h3>${esc(c.label)}</h3>
+    <div class="meta s-${c.state}"><span class="chip">${esc(c.state_label)}</span>
+      <span style="font-size:13px;color:var(--dim)">${esc(c.language)}</span>${reading}</div>
+    ${c.state === "filler" && !c.fault ? "<p>A holding clip is playing — normal before kick-off and at half-time.</p>" : ""}
+    ${!c.broadcasting ? "<p>Not broadcasting yet. Claim it now and measuring starts the moment it goes live.</p>" : ""}
+    ${!c.mmc ? "<p>This channel is not on MMC's list. Claim it only if you are commentating on it.</p>" : ""}
+    ${other ? `<div class="notice"><b>${esc(c.claim.commentator || "Someone")}</b> claimed this at ${hhmm(c.claim.claimed_at)}${c.claim.fixture ? " for " + esc(c.claim.fixture) : ""}.</div>` : ""}
+    <form id="claimForm">
+      <div class="field"><label class="lbl" for="fx">Match</label>
+        <input id="fx" list="mOpts" placeholder="Start typing a team" autocomplete="off" value="${esc(fx)}">
+        <datalist id="mOpts">${refreshMatchOptions()}</datalist>
+        <span class="hint">Pick from the list so we know the match clock. Not listed? Type it.</span></div>
+      <div class="field"><label class="lbl" for="nm">Your name</label>
+        <input id="nm" placeholder="e.g. Marco" autocomplete="name" value="${esc(nm)}"></div>
+      <button class="go ${other ? "take" : ""}" id="goBtn">${other ? "Take over this channel" : "Start monitoring " + esc(c.short)}</button>
+      <div class="err" id="claimErr" role="alert"></div>
+    </form>`;
+  if (focused === "fx" || focused === "nm") {
+    const el = $(focused); el.focus();
+    if (el.setSelectionRange) el.setSelectionRange(el.value.length, el.value.length);
+  }
+  $("claimForm").onsubmit = e => { e.preventDefault(); doClaim(c.channel, !!other); };
+}
+
+function select(ch) {
+  selected = ch;
+  if ($("claimBox").dataset.ch !== ch) delete $("claimBox").dataset.ch;
+  renderRows(); renderClaimBox();
+  if (window.matchMedia("(max-width:1150px)").matches) $("claimBox").scrollIntoView({behavior: "smooth"});
+}
+
+async function doClaim(ch, force) {
+  const btn = $("goBtn"); btn.disabled = true; $("claimErr").textContent = "";
+  const name = $("nm").value.trim(), typed = $("fx").value.trim();
+  const eventId = MATCH_BY_LABEL.get(typed) || "";
+  try {
+    await post("/api/claim", {channel: ch, commentator: name, fixture: eventId ? "" : typed,
+                              event_id: eventId, force});
+    store.set("qc_name", name || null);
+    mine = ch; store.set("qc_claim", ch); pendingMatch = null;
+    openDeck(ch); tickBoard();
+  } catch (e) {
+    btn.disabled = false;
+    $("claimErr").textContent = e.status === 409
+      ? `${e.message}. Press again to take over.` : `Could not start monitoring: ${e.message}`;
+    if (e.status === 409) { btn.classList.add("take"); btn.textContent = "Take over this channel";
+      $("claimForm").onsubmit = ev => { ev.preventDefault(); doClaim(ch, true); }; }
+  }
+}
+
+async function tickBoard() {
+  if (document.hidden) return;
+  try {
+    DATA = await api("/api/channels");
+  } catch {
+    pill("hRec", "bad", "QC server unreachable");
+    $("ticker").textContent = "Cannot reach the QC server — the figures below are out of date.";
+    return;
+  }
+  renderHealth(DATA.summary, DATA.now);
+  renderScores(DATA.summary);
+  renderMatches();
+  if (view === "board") { renderRows(); renderFeed(); renderMine(); renderClaimBox(); }
+}
+
+/* ---------------- live deck ---------------- */
+const LO = -50, HI = 0, MW = 520;
+const mx = l => Math.max(0, Math.min(MW, (Math.max(LO, Math.min(HI, l)) - LO) / (HI - LO) * MW));
+const attr = (id, o) => { const el = $(id); for (const k in o) el.setAttribute(k, o[k]); };
+
+function paintMeter(m, t) {
+  const q = mx(t.quiet), l = mx(t.loud), tg = mx(t.target);
+  attr("mZone", {x: q, width: Math.max(0, l - q)});
+  attr("mQ", {x1: q, x2: q}); attr("mL", {x1: l, x2: l}); attr("mT", {x1: tg, x2: tg});
+  attr("tQ", {x: q}); $("tQ").textContent = t.quiet;
+  attr("tL", {x: l}); $("tL").textContent = t.loud;
+  attr("tZone", {x: (q + l) / 2});
+  if (!m) { attr("mBar", {width: 0}); attr("mNeedle", {x1: -5, x2: -5}); attr("mNow", {x: -5});
+            $("lufsNow").innerHTML = "—<small>LUFS</small>"; return; }
+  const v = m.lufs_minute ?? m.lufs_short, w = mx(v);
+  attr("mBar", {width: w});
+  $("mBar").setAttribute("class", "m-bar" + (v < t.quiet ? " lo" : v > t.loud ? " hi" : ""));
+  attr("mNeedle", {x1: w, x2: w}); attr("mNow", {x: mx(m.lufs_short) - 1.5});
+  $("lufsNow").innerHTML = `${fmt(v)}<small>LUFS</small>`;
+}
+
+function cell(id, text, cls) { const n = $(id); n.textContent = text; n.className = "v" + (cls ? " " + cls : ""); }
+
+async function tickDeck() {
+  if (document.hidden || !mine) return;
+  let d;
+  try { d = await api("/api/status/" + encodeURIComponent(mine)); }
+  catch { $("vHead").textContent = "NO CONNECTION"; $("vAct").textContent = "Cannot reach the QC server";
+          $("verdict").className = "panel verdict unknown"; return; }
+
+  if (!d.claim) { mine = null; store.set("qc_claim", null); closeDeck(); return; }
+  const v = d.verdict;
+  $("verdict").className = "panel verdict " + v.state;
+  $("vHead").textContent = v.headline; $("vAct").textContent = v.action;
+  const on = d.measured && !["nosignal", "starting"].includes(d.state);
+  $("tally").className = "tally" + (on ? " on" : "");
+  $("tallyTxt").textContent = on ? "Measuring" : d.broadcasting ? "Not measuring" : "Off air";
+
+  $("dName").textContent = d.label;
+  const c = d.claim, m2 = Math.max(0, Math.floor((d.now - c.claimed_at) / 60));
+  $("dSub").textContent = [c.match ? "" : c.fixture, c.commentator, d.language, `claimed ${m2} min ago`].filter(Boolean).join(" · ");
+  const mt = c.match;
+  $("dMatch").hidden = !mt;
+  if (mt) $("dMatch").innerHTML = `<span class="nm">${esc(mt.name)}</span>
+      <span class="cp">${esc(mt.competition)} · kick-off ${esc(dayLabel(mt.kickoff))} ${hhmm(mt.kickoff)}</span>
+      ${phaseMark(mt)}<span class="sc">${scoreOf(mt)}</span>`;
+
+  const m = d.metric, t = d.targets;
+  paintMeter(m, t);
+  if (m) {
+    const b = m.voice_to_crowd_med;
+    cell("cBal", `${fmt(b)} dB`, b < t.balance_low ? "no" : b > t.balance_high ? "mid" : "ok");
+    cell("cPeak", `${fmt(m.true_peak_dbtp)} dBTP`, m.true_peak_dbtp > t.peak ? "no" : "ok");
+    cell("cTalk", `${Math.round((m.speech_ratio || 0) * 100)}%`);
+    cell("cCrowd", `${fmt(m.crowd_lufs)} LUFS`);
+  } else ["cBal", "cPeak", "cTalk", "cCrowd"].forEach(id => cell(id, "—"));
+
+  const rows = (d.alerts || []).filter(a => a.rule !== "no_crowd");
+  $("log").innerHTML = '<div class="pad lbl">This session</div>' + (rows.length ? rows.map(a =>
+    `<div class="row2"><span class="tm mono">${hhmmss(a.wall)}</span>
+     <span class="ev ${a.event}">${a.event === "FIRE" ? "ALERT" : a.event === "ESCALATE" ? "WORSE" : "RESOLVED"}</span>
+     <span>${esc(a.message)}</span></div>`).join("") : '<div class="empty">No alerts yet this session.</div>');
+}
+
+async function tickTrend() {
+  if (document.hidden || !mine) return;
+  let d; try { d = await api(`/api/history/${encodeURIComponent(mine)}?minutes=10`); } catch { return; }
+  const svg = $("trend"), H = 150, L = 34, R = 512, T = 8, B = 128;
+  const y0 = -55, y1 = -5, t = d.targets;
+  const X = w => L + (w - d.from) / (d.now - d.from) * (R - L);
+  const Y = v => T + (y1 - Math.max(y0, Math.min(y1, v))) / (y1 - y0) * (B - T);
+  let g = `<rect class="c-band" x="${L}" y="${Y(t.loud)}" width="${R - L}" height="${Y(t.quiet) - Y(t.loud)}"/>`;
+  for (const v of [-50, -40, -30, -20, -10]) g += `<line class="c-grid" x1="${L}" x2="${R}" y1="${Y(v)}" y2="${Y(v)}"/><text x="${L - 6}" y="${Y(v) + 3.5}" text-anchor="end">${v}</text>`;
+  g += `<line class="c-target" x1="${L}" x2="${R}" y1="${Y(t.target)}" y2="${Y(t.target)}"/>`;
+  g += `<text x="${L}" y="${H - 4}">10 min ago</text><text x="${(L + R) / 2}" y="${H - 4}" text-anchor="middle">5 min</text><text x="${R}" y="${H - 4}" text-anchor="end">now</text>`;
+  const pts = d.points.filter(p => p[1] !== null);
+  if (pts.length > 1) {
+    const path = k => pts.filter(p => p[k] !== null).map((p, i) => `${i ? "L" : "M"}${X(p[0]).toFixed(1)},${Y(p[k]).toFixed(1)}`).join("");
+    g += `<path class="c-short" d="${path(1)}"/><path class="c-min" d="${path(2)}"/>`;
+    const last = [...pts].reverse().find(p => p[2] !== null);
+    if (last) g += `<circle class="c-dot" cx="${X(last[0])}" cy="${Y(last[2])}" r="3.5"/>`;
+  } else {
+    g += `<text x="${(L + R) / 2}" y="${(T + B) / 2}" text-anchor="middle">History builds up while we listen</text>`;
+  }
+  svg.innerHTML = g;
+}
+
+/* ---------------- match report ---------------- */
+function reportHtml(r) {
+  if (r.empty) return `<h3>Match <span>report</span></h3><p style="color:var(--dim);margin-top:10px">
+    Nothing was measured on this channel in the last ${Math.round(r.minutes)} minutes.</p>`;
+  const band = `${r.quiet_line} to ${r.loud_line}`;
+  const offset = r.offset_from_target;
+  const offClass = offset === null ? "" : Math.abs(offset) <= 2 ? "ok" : Math.abs(offset) <= 4 ? "mid" : "no";
+  const cells = [
+    ["Measured", mins(r.measured_s), "audio we heard"],
+    ["Commentary", mins(r.live_s), "not clip, not silence"],
+    ["Holding clip", `${r.clip_pct}%`, "of the time"],
+    ["Median level", r.median_lufs === null ? "—" : `${r.median_lufs} LUFS`, `target ${r.target}`, offClass],
+    ["Off target", offset === null ? "—" : `${offset > 0 ? "+" : ""}${offset} LU`, "median vs target", offClass],
+    ["In range", `${r.on_target_pct}%`, `within 2 LU of ${r.target}`],
+    ["Too quiet", mins(r.quiet_s), `under ${r.quiet_line} (${r.quiet_pct}%)`, r.quiet_s > 60 ? "no" : ""],
+    ["Too loud", mins(r.loud_s), `over ${r.loud_line} (${r.loud_pct}%)`, r.loud_s > 60 ? "no" : ""],
+    ["Highest peak", r.peak_max === null ? "—" : `${r.peak_max} dBTP`, `limit ${r.peak_limit}`,
+      r.peak_max !== null && r.peak_max > r.peak_limit ? "no" : "ok"],
+    ["Distorting", mins(r.clipping_s), "flat-topped samples", r.clipping_s > 0 ? "no" : "ok"],
+    ["Voice over crowd", r.balance_median === null ? "—" : `${r.balance_median} dB`, `aim ${r.balance_low}+`],
+    ["Talking", `${Math.round(r.speech_pct)}%`, "of commentary time"],
+  ];
+  const alerts = (r.alerts || []).filter(a => a.rule !== "no_crowd");
+  return `<h3>Match <span>report</span></h3>
+    <p style="color:var(--ink-2);font-size:13.5px;margin-top:6px">${esc(r.label)} · last ${Math.round(r.minutes)} minutes ·
+      loudness measured over commentary only, clips and silence excluded. Alert band ${band} LUFS.</p>
+    <div class="rgrid">${cells.map(([k, v, h, cls]) => `<div class="rcell">
+      <span class="lbl">${esc(k)}</span><span class="v ${cls || ""}">${esc(v)}</span><span class="h">${esc(h)}</span></div>`).join("")}</div>
+    ${alerts.length ? `<ul class="rlist">${alerts.map(a => `<li>
+        <span class="rl ${a.rule === "filler_playing" ? "soft" : ""}">${esc(a.rule.replace(/_/g, " ").toUpperCase())}</span>
+        <span class="rs">${esc(a.message)}${a.worsened ? ` · got worse ${a.worsened}×` : ""}</span>
+        <span class="rd">${hhmm(a.from)} · ${mins(a.seconds)}${a.open ? " · still open" : ""}</span></li>`).join("")}</ul>`
+      : '<p style="color:var(--dim);margin-top:12px">No alerts in this window.</p>'}`;
+}
+
+async function showReport() {
+  if (!mine) return;
+  const box = $("report");
+  box.hidden = false;
+  box.innerHTML = '<h3>Match <span>report</span></h3><p style="color:var(--dim);margin-top:8px">Working it out…</p>';
+  try {
+    const r = await api(`/api/report/${encodeURIComponent(mine)}?minutes=180`);
+    box.innerHTML = reportHtml(r);
+  } catch (e) {
+    box.innerHTML = `<h3>Match <span>report</span></h3><p style="color:var(--red);margin-top:8px">Could not build it: ${esc(e.message)}</p>`;
+  }
+  box.scrollIntoView({behavior: "smooth", block: "nearest"});
+}
+
+function openDeck(ch) {
+  mine = ch; view = "deck";
+  $("board").hidden = true; $("deck").hidden = false; $("report").hidden = true;
+  clearInterval(deckTimer); clearInterval(trendTimer);
+  tickDeck(); tickTrend();
+  deckTimer = setInterval(tickDeck, 2000);
+  trendTimer = setInterval(tickTrend, 10000);
+  window.scrollTo({top: 0});
+}
+function closeDeck() {
+  view = "board"; clearInterval(deckTimer); clearInterval(trendTimer);
+  $("deck").hidden = true; $("board").hidden = false;
+  if (DATA) { renderRows(); renderMatches(); renderFeed(); renderMine(); renderClaimBox(); }
+}
+
+$("backBtn").onclick = closeDeck;
+$("repBtn").onclick = showReport;
+$("offBtn").onclick = async () => {
+  const ch = mine;
+  await showReport();                    // the last thing you see is how it went
+  try { await post("/api/release", {channel: ch}); } catch {}
+  mine = null; store.set("qc_claim", null); selected = ch;
+  setTimeout(() => { closeDeck(); tickBoard(); }, 400);
+};
+
+/* ---------------- controls ---------------- */
+document.querySelectorAll("[data-filter]").forEach(b => b.onclick = () => {
+  filter = (filter === b.dataset.filter && b.classList.contains("tile")) ? "all" : b.dataset.filter;
+  query = ""; $("search").value = "";
+  if (view === "deck") closeDeck();
+  renderScores(DATA.summary); renderRows();
+  $("chTitle").scrollIntoView({behavior: "smooth", block: "start"});
+});
+document.querySelector("[data-action=matches]").onclick = () => {
+  mtab = "live"; if (view === "deck") closeDeck();
+  renderMatches(); $("matchesPanel").scrollIntoView({behavior: "smooth", block: "start"});
+};
+document.querySelectorAll(".tab").forEach(t => t.onclick = () => { mtab = t.dataset.tab; renderMatches(); });
+$("mComp").onchange = e => { mcomp = e.target.value; renderMatches(); };
+$("search").oninput = e => { query = e.target.value.trim().toLowerCase(); renderScores(DATA.summary); renderRows(); };
+setInterval(() => { $("clock").textContent = new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"}); }, 1000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { tickBoard(); if (view === "deck") { tickDeck(); tickTrend(); } } });
+
+(async function start() {
+  await tickBoard();
+  setInterval(tickBoard, 5000);
+  if (mine && DATA && DATA.channels.some(c => c.channel === mine && c.claim)) openDeck(mine);
+  else { mine = null; store.set("qc_claim", null); }
+})();
+</script>
+</body>
+</html>
