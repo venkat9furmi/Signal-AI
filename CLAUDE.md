@@ -566,3 +566,91 @@ the page at all.
 **Left in `shadow` + `mock`** - free, publishes nothing, and `claimed_only` is
 on, so nothing runs until a commentator claims a channel. Switch the provider to
 `camb` once a key is in `.translate.env`.
+
+## Session 6 - 2026-11-08: modes are endpoint wirings; the page is four things
+
+**The correction that drove this session.** Session 5 built `shadow` as a
+persisted global pipeline mode written into `claims.db`. That was wrong. A mode
+is an **execution wiring selected by the endpoint**: which provider is built,
+what it may spend, where the result is kept, who sees it. So the paths are
+namespaced by it and `prod` was renamed to the user's word, `standard`:
+
+```
+POST /api/translate/shadow/run     -> runs
+POST /api/translate/standard/run   -> 501 + what building it needs
+GET  /api/translate/staging/model  -> 404 naming the modes that exist
+```
+
+`modes/base.py` holds `ModeInfo` + `Wiring` + `NotBuiltMode`; `modes/shadow.py`
+is the only implementation; `modes/standard.py` is **declared and deliberately
+empty**, and its docstring lists exactly what building it means (an audience, a
+budget agreed with whoever pays, who triggers a run, a retention decision).
+It refuses rather than falling back to shadow - asking for production and
+silently getting the test wiring is the one failure invisible from outside.
+`Mode.ALIASES` keeps `prod` loading, so a control row written last session
+still validates.
+
+**Only shadow is built, by instruction.** The old 7-section page is gone
+(`git show 6ffb9b2` has it). The page is now four things: the model and what
+its audio translation does, credit, a run button, and two audio players.
+
+**The feature is now audio-to-audio, because you have to be able to hear it.**
+`SpokenAudio` and `TranslationRun` are new domain types; `Speaker` is a third
+port beside `Transcriber` and `Translator`.
+
+- **Camb's one-call dubbing is unreachable for us.** `POST /dub` takes a
+  `video_url` it fetches the media from. Our clip is a few seconds in memory on
+  a host with no public address, so there is nothing to give it. The page says
+  this under "not available" rather than leaving it looking like an oversight.
+- **The reachable path is three calls**: `POST /transcribe` (multipart upload)
+  -> `POST /translate` -> `POST /tts-stream`. The last one is the only call in
+  the adapter that does not parse JSON: it streams raw audio back, so
+  `_call(..., raw=True)` returns `(bytes, headers)`.
+- **Camb publishes no balance, quota or usage endpoint.** Verified against
+  `llms.txt` and the OpenAPI spec. The only figure it gives is the
+  `X-Credits-Required` response header on the call that incurred it, documented
+  with no unit - so it is stored and shown as a **string, verbatim**. The page
+  shows our own count of seconds (what the cap is enforced on) beside it and
+  says which is which. An invented balance would be worse than none.
+- `/list-voices` contradicts itself in the docs - an object with a `voices` key
+  in the example, a bare array in the schema. The mapper accepts both.
+- `mappers/tts.py` is separate from `mappers/camb.py`: everything in that file
+  is shaped around the create/poll/fetch `task_id` dance, and `/tts-stream` is
+  none of that.
+
+**New infrastructure**
+- `grab.py` - its own short ffmpeg pull for one run, not a hook into the
+  recorder. The containers are separate, the recorder only watches claimed and
+  configured channels, and the appeal of a shadow run is that it works on any
+  channel at any time. A 15 s pull is cheap; a cross-process audio handoff is not.
+- `runs.py` - a **third** SQLite file, `data/translate.db`, owned by the web
+  process. Same one-writer-per-file rule as `live.db` (recorder) and
+  `claims.db` (page). The audio lives in the row; `KEEP_AUDIO = 25` strips old
+  blobs while keeping the record of what was tried.
+- Shadow has its **own** budget (`shadow_daily_minutes`, default 10) separate
+  from the continuous pipeline's 60. Verified it survives a rebuild: 40 s spent,
+  `docker compose up --build`, still 40 s - seeded from the database.
+
+**A real gap this closed.** `providers.describe()` told the page Camb was
+unselectable without a key while `providers.build()` happily returned one, so a
+request naming it got as far as capturing 15 s of audio before failing on the
+first call. Both now go through one `blocked_reason()`.
+
+**Verified on live audio, 8 Nov**: real runs on `football-104` (French),
+`football-100` (Greek), `greyhounds-01`. 12 s of real commentary in, a playable
+WAV out of both sides (heard RMS 0.237, spoken RMS 0.141 - audible, not a
+silent file passing for a working player). A dead channel answers 409 in 0.7 s.
+202 checks in `test_translate.py`; the fake Camb now serves `/tts-stream` with
+the credit header, `/list-voices` and `/target-languages`.
+
+**Still the offline `mock` provider** - beeps, one note per word, deliberately
+nothing like speech so nobody mistakes the stand-in for a voice that got the
+commentary wrong. Put a key in `.translate.env` and pick Camb on the page.
+Worth pressing nothing else first: the page's "languages" count comes from
+`/source-languages`, so whether Greek and Portuguese are actually offered is
+unverified until a real key answers.
+
+**Not touched, still open from Session 5**: the clip-blamed-on-commentator
+noise (Ch.31 repeating an identical `clipping` message for ~6 min before
+`filler_playing` caught up). It is an `engine.py` sequencing change that affects
+live alerting, so it waits for a decision.

@@ -21,10 +21,12 @@ from typing import Sequence
 
 import numpy as np
 
+from ..audio import to_wav
 from ..models import (
     AudioSegment,
     ProviderFailed,
     RateLimited,
+    SpokenAudio,
     Transcript,
     Translation,
     Utterance,
@@ -136,7 +138,82 @@ class MockProvider:
             latency_s=time.perf_counter() - started,
         )
 
+    def speak(self, text: str, language: str) -> SpokenAudio:
+        """Audible, free, and obviously synthetic.
+
+        It has to make a real sound: the page's whole claim is that you can
+        press play and hear the translation, and a silent or absent file would
+        let a broken player pass for a working one. So this builds a short
+        tone sequence -- one note per word, pitched from the word's own hash,
+        with a gap between words.
+
+        It is deliberately nothing like speech. Anyone who presses play hears
+        a run of beeps and knows immediately they are listening to the
+        stand-in rather than a voice that got the commentary wrong.
+        """
+        started = time.perf_counter()
+        self._tick()
+        words = [w for w in (text or "").split() if w][:40]
+        rate = 16_000
+        if not words:
+            return SpokenAudio(
+                audio=to_wav(np.zeros(rate // 4, dtype=np.float32), rate, rate),
+                media_type="audio/wav", voice="mock-beeps", model=self.model,
+                provider=self.name, language=language,
+                latency_s=time.perf_counter() - started, credits="0",
+            )
+        pieces = []
+        for word in words:
+            seed = int(hashlib.sha1(word.encode("utf-8")).hexdigest()[:6], 16)
+            # Roughly a two-octave span starting near the middle of a voice.
+            freq = 180.0 + (seed % 24) * 28.0
+            n = int(rate * (0.10 + (seed % 7) * 0.02))
+            t_ax = np.arange(n, dtype=np.float32) / rate
+            # A short fade at each end, so the sequence does not click.
+            fade = np.minimum(1.0, np.minimum(t_ax, (n / rate) - t_ax) * 60.0)
+            pieces.append(0.25 * np.sin(2 * np.pi * freq * t_ax) * fade)
+            pieces.append(np.zeros(int(rate * 0.06), dtype=np.float32))
+        audio = np.concatenate(pieces).astype(np.float32)
+        return SpokenAudio(
+            audio=to_wav(audio, rate, rate),
+            media_type="audio/wav",
+            voice="mock-beeps",
+            model=self.model,
+            provider=self.name,
+            language=language,
+            latency_s=time.perf_counter() - started,
+            credits="0",
+        )
+
+    def voices(self) -> tuple[dict, ...]:
+        return ({"id": 0, "name": "mock-beeps", "language": "any",
+                 "gender": "", "age": None,
+                 "description": "One beep per word. Not a voice."},)
+
     # -- housekeeping ----------------------------------------------------
+    def capabilities(self) -> dict:
+        return {
+            "provider": self.name,
+            "model": self.model,
+            "voice_model": "mock-beeps",
+            "audio_in": True,
+            "audio_out": True,
+            "steps": [
+                {"name": "Hear it", "endpoint": "none",
+                 "detail": "Words are picked from a football vocabulary using a "
+                           "hash of the audio, so the same clip always gives the "
+                           "same transcript. It is not listening."},
+                {"name": "Translate it", "endpoint": "none",
+                 "detail": "The text is tagged with the target language and "
+                           "otherwise left alone, so nobody can mistake it for "
+                           "a translation."},
+                {"name": "Speak it", "endpoint": "none",
+                 "detail": "One beep per word. Proves the audio path end to "
+                           "end without spending a credit."},
+            ],
+            "not_available": [],
+        }
+
     def languages(self) -> dict[str, str]:
         return {
             "en-us": "English", "it-it": "Italian", "pt-pt": "Portuguese",

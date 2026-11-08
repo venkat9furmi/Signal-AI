@@ -81,10 +81,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--status-every", type=float, default=300.0,
                    help="Seconds between per-channel status lines (default 300).")
     p.add_argument("--translate", choices=Mode.ALL, default=None,
-                   help="Transcribe and translate commentary: 'off', 'shadow' (runs and "
-                        "stores everything but publishes nothing) or 'prod'. The page can "
-                        "change this at runtime; this only sets the starting value. "
-                        "Defaults to QC_TRANSLATE_MODE, or off.")
+                   help="Continuous transcription of claimed channels: 'off', "
+                        "'shadow' (runs and stores everything but publishes "
+                        "nothing) or 'standard'. Separate from the /translate "
+                        "page, which runs one clip at a time on demand and needs "
+                        "nothing switched on here. Defaults to "
+                        "QC_TRANSLATE_MODE, or off.")
     p.add_argument("--translate-provider", default=None,
                    help="Which model: 'mock' (offline and free) or 'camb'. Camb needs "
                         "CAMB_API_KEY. Defaults to QC_TRANSLATE_PROVIDER, or mock.")

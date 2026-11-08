@@ -34,17 +34,21 @@ from commentary_qc.translate import control as control_mod  # noqa: E402
 from commentary_qc.translate.audio import to_wav, wav_seconds  # noqa: E402
 from commentary_qc.translate.budget import Budget  # noqa: E402
 from commentary_qc.translate.mappers import camb as cm  # noqa: E402
+from commentary_qc.translate.mappers import tts as tm  # noqa: E402
 from commentary_qc.translate.mappers.languages import LanguageMap  # noqa: E402
 from commentary_qc.translate.models import (  # noqa: E402
     AudioSegment,
+    ModeNotBuilt,
     NotConfigured,
     OutOfCredit,
     ProviderFailed,
     RateLimited,
 )
+from commentary_qc.translate.modes import ModeRegistry  # noqa: E402
 from commentary_qc.translate.providers import build, describe  # noqa: E402
 from commentary_qc.translate.providers.camb import CambProvider  # noqa: E402
 from commentary_qc.translate.providers.mock import MockProvider  # noqa: E402
+from commentary_qc.translate.runs import RunStore  # noqa: E402
 from commentary_qc.translate.segmenter import Segmenter  # noqa: E402
 from commentary_qc.translate.settings import Mode  # noqa: E402
 from commentary_qc.translate.store import CaptionStore  # noqa: E402
@@ -334,9 +338,10 @@ def test_settings_and_modes() -> None:
     check("shadow runs on a claimed channel", shadow.covers("football-01", True))
     check("shadow does not publish", not shadow.publishes)
     check("shadow skips unclaimed channels", not shadow.covers("football-02", False))
-    prod = TranslateSettings(mode=Mode.PROD)
-    check("prod publishes", prod.publishes)
-    picked = TranslateSettings(mode=Mode.PROD, channels=("football-41",))
+    standard = TranslateSettings(mode=Mode.STANDARD)
+    check("standard publishes", standard.publishes)
+    check("the old name still loads", TranslateSettings(mode="prod").mode == Mode.STANDARD)
+    picked = TranslateSettings(mode=Mode.STANDARD, channels=("football-41",))
     check("an explicit channel list narrows it further",
           picked.covers("football-41", True) and not picked.covers("football-01", True))
     anyone = TranslateSettings(mode=Mode.SHADOW, claimed_only=False)
@@ -379,7 +384,7 @@ def test_control(tmp: Path) -> None:
         mode=Mode.OFF, enabled_providers=("mock", "camb"), camb_api_key="k")
     applied = control_mod.apply(
         keyed, {"mode": "prod", "provider": "camb", "target": "en-us"})
-    check("with a key it goes to prod", applied.mode == Mode.PROD
+    check("with a key it goes to standard", applied.mode == Mode.STANDARD
           and applied.provider == "camb")
 
 
@@ -391,7 +396,15 @@ def test_registry() -> None:
         build("camb", s)
         check("a disabled provider cannot be built by any path", False)
     except NotConfigured as exc:
-        check("a disabled provider cannot be built by any path", "not enabled" in str(exc))
+        check("a disabled provider cannot be built by any path",
+              "not enabled" in str(exc))
+    try:
+        build("camb", TranslateSettings(enabled_providers=("mock", "camb")))
+        check("a provider with no key is refused before any audio is captured",
+              False)
+    except NotConfigured as exc:
+        check("a provider with no key is refused before any audio is captured",
+              "CAMB_API_KEY" in str(exc))
     try:
         build("whisper-xl", s)
         check("an unknown provider is refused", False)
@@ -432,6 +445,7 @@ class FakeCamb(BaseHTTPRequestHandler):
     fail_with = 0          # an HTTP status to return instead of working
     fail_times = 0         # how many times, then recover
     uploads: list[int] = []
+    spoken: list[dict] = []
     _poll_counts: dict[str, int] = {}
 
     protocol_version = "HTTP/1.1"
@@ -479,6 +493,23 @@ class FakeCamb(BaseHTTPRequestHandler):
             payload = json.loads(body)
             cls._poll_counts["texts"] = len(payload["texts"])
             self._send(200, {"task_id": "task-tl-1"})
+        elif self.path == "/tts-stream":
+            payload = json.loads(body)
+            cls.spoken.append(payload)
+            # The documented contract, asserted here so a mapper that drifts
+            # out of it fails in a test rather than as a 422 in production.
+            assert 3 <= len(payload["text"]) <= 3000, "text out of bounds"
+            assert isinstance(payload["voice_id"], int), "voice_id must be an int"
+            assert payload["language"] == payload["language"].lower(), "tag must be lowercase"
+            assert payload["output_configuration"]["format"] == "wav"
+            wav = to_wav(np.zeros(1600, dtype=np.float32), 16_000, 16_000)
+            self.send_response(200)
+            self.send_header("content-type", "audio/wav")
+            self.send_header("content-length", str(len(wav)))
+            # The only credit figure Camb publishes anywhere.
+            self.send_header("X-Credits-Required", "42")
+            self.end_headers()
+            self.wfile.write(wav)
         else:
             self._send(404, {"detail": "no such path"})
 
@@ -488,12 +519,21 @@ class FakeCamb(BaseHTTPRequestHandler):
         cls.keys.append(self.headers.get("x-api-key", ""))
         if self._maybe_fail():
             return
-        if self.path == "/source-languages":
+        if self.path in ("/source-languages", "/target-languages"):
             self._send(200, [
                 {"id": 1, "language": "English", "short_name": "en-US"},
                 {"id": 2, "language": "Italian", "short_name": "it-IT"},
                 {"id": 3, "language": "German", "short_name": "de-DE"},
             ])
+        elif self.path == "/list-voices":
+            # The wrapped shape. Camb's reference shows this in its example
+            # and a bare array in its schema, so both have to work.
+            self._send(200, {"voices": [
+                {"id": 147320, "voice_name": "Gary", "gender": 1, "age": 35,
+                 "language": "en-us", "description": "A rich, warm voice"},
+                {"id": 20305, "voice_name": "Alice", "gender": 2, "age": 65,
+                 "language": "en-us", "description": "A warm, steady voice"},
+            ]})
         elif m := re.match(r"^/(transcribe|translate)/(.+)$", self.path):
             kind, task = m.group(1), m.group(2)
             seen = cls._poll_counts.get(task, 0) + 1
@@ -516,7 +556,7 @@ class FakeCamb(BaseHTTPRequestHandler):
 
     @classmethod
     def reset(cls) -> None:
-        cls.calls, cls.keys, cls.uploads = [], [], []
+        cls.calls, cls.keys, cls.uploads, cls.spoken = [], [], [], []
         cls.pending_polls = 0
         cls.fail_with = 0
         cls.fail_times = 0
@@ -893,6 +933,263 @@ def _wait(cond, timeout: float) -> bool:
     return cond()
 
 
+
+# ---------------------------------------------------------------------------
+# Speech synthesis: the mapper, then the adapter against the fake.
+# ---------------------------------------------------------------------------
+def test_tts_mappers() -> None:
+    section("Speech mappers, against the documented shapes")
+
+    body = tm.tts_body("palla in mezzo", "EN-US", voice_id=147320)
+    check("the locale tag is lowercased, as the docs require",
+          body["language"] == "en-us")
+    check("voice_id is an integer", isinstance(body["voice_id"], int))
+    check("the format goes inside output_configuration",
+          body["output_configuration"] == {"format": "wav"})
+    check("whitespace is collapsed, so a newline cannot inflate the text",
+          tm.tts_body("a  b\n c", "en-us", voice_id=1)["text"] == "a b c")
+
+    try:
+        tm.tts_body("hi", "en-us", voice_id=1)
+        check("text under the documented minimum is refused here, not by a 422", False)
+    except ProviderFailed as exc:
+        check("text under the documented minimum is refused here, not by a 422",
+              "at least 3" in str(exc))
+    long_text = tm.tts_body("goal " * 2000, "en-us", voice_id=1)
+    check("an over-long transcript is trimmed to the documented 3000",
+          len(long_text["text"]) <= 3000)
+    check("and trimmed at a word boundary, so the audio ends on a word",
+          not long_text["text"].endswith("goa"))
+    try:
+        tm.tts_body("hello there", "en-us", voice_id=1, audio_format="ogg")
+        check("a format Camb does not offer is refused", False)
+    except ProviderFailed:
+        check("a format Camb does not offer is refused", True)
+
+    check("wav maps to the type a browser plays",
+          tm.media_type("wav") == "audio/wav")
+    check("mp3 is audio/mpeg, not audio/mp3", tm.media_type("mp3") == "audio/mpeg")
+    check("raw PCM is not offered as playable", "pcm_s16le" not in tm.PLAYABLE)
+
+    check("the credit header is read whatever its case",
+          tm.credits_required({"x-credits-required": "17"}) == "17")
+    check("a response without it gives an empty string, not a fake zero",
+          tm.credits_required({}) == "")
+
+    wrapped = tm.voices({"voices": [{"id": 1, "voice_name": "Gary", "gender": 1}]})
+    bare = tm.voices([{"id": 1, "voice_name": "Gary", "gender": 1}])
+    check("both documented voice-list shapes are accepted", wrapped == bare)
+    check("the integer gender is turned into a word", wrapped[0]["gender"] == "male")
+
+
+def test_camb_speech(base: str) -> None:
+    section("Camb speech, against the local fake")
+    FakeCamb.reset()
+    s = TranslateSettings(
+        mode=Mode.SHADOW, provider="camb", camb_api_key="test-key",
+        camb_base_url=base, poll_interval_s=0.01, job_timeout_s=2.0,
+    )
+    provider = CambProvider(s)
+
+    spoken = provider.speak("e il portiere respinge", "it-it")
+    check("the audio comes back as bytes, not a URL", isinstance(spoken.audio, bytes))
+    check("and it is a real WAV a browser can play", spoken.audio[:4] == b"RIFF")
+    check("the media type is carried with it", spoken.media_type == "audio/wav")
+    check("the credit figure the provider reported is kept verbatim",
+          spoken.credits == "42")
+    check("one call, not a create/poll/fetch dance",
+          [c for c in FakeCamb.calls if c[1] == "/tts-stream"]
+          == [("POST", "/tts-stream")])
+    check("the key was sent", "test-key" in FakeCamb.keys)
+    check("latency is measured", spoken.latency_s > 0)
+
+    voices = provider.voices()
+    check("the voice list is read through the mapper", len(voices) == 2)
+    check("and names a concrete voice", voices[0]["name"] == "Gary")
+
+    caps = provider.capabilities()
+    check("the provider describes its own three steps", len(caps["steps"]) == 3)
+    check("and says plainly that one-call dubbing is out of reach",
+          any("dub" in str(x.get("endpoint", "")).lower()
+              for x in caps["not_available"]))
+
+    # No credit must stop, not retry: a refusal repeated three times is three
+    # refusals and still no audio.
+    FakeCamb.reset()
+    FakeCamb.fail_with, FakeCamb.fail_times = 402, 99
+    try:
+        provider.speak("palla in mezzo", "it-it")
+        check("no credit raises OutOfCredit rather than returning silence", False)
+    except OutOfCredit:
+        check("no credit raises OutOfCredit rather than returning silence", True)
+    check("and it was not retried",
+          len([c for c in FakeCamb.calls if c[1] == "/tts-stream"]) == 1)
+    FakeCamb.reset()
+
+
+# ---------------------------------------------------------------------------
+# Execution modes: the wiring, and what a mode refuses.
+# ---------------------------------------------------------------------------
+def test_execution_modes() -> None:
+    section("Execution modes")
+    s = TranslateSettings(provider="mock")
+    modes = ModeRegistry(s)
+
+    check("both wirings are declared",
+          [m["name"] for m in modes.describe()] == ["shadow", "standard"])
+    check("only shadow is built",
+          [m["built"] for m in modes.describe()] == [True, False])
+    check("the default is the mode that neither spends much nor publishes",
+          modes.default == "shadow")
+
+    wiring = modes.wire("shadow")
+    check("shadow builds a provider", wiring.provider.name == "mock")
+    check("shadow publishes nothing", not wiring.publishes)
+    check("shadow keeps the audio", wiring.retains_audio)
+    check("what the mode changed is visible, not implied",
+          wiring.overrides == {"claimed_only": False})
+    check("and it is actually applied", wiring.settings.claimed_only is False)
+    check("the configured settings are not mutated by wiring a mode",
+          s.claimed_only is True)
+
+    try:
+        modes.wire("standard")
+        check("standard refuses rather than falling back to shadow", False)
+    except ModeNotBuilt as exc:
+        check("standard refuses rather than falling back to shadow",
+              "not built" in str(exc))
+    check("and it says what building it needs",
+          "budget" in modes.get("standard").info.pending)
+
+    try:
+        modes.get("staging")
+        check("an unknown mode names the ones that exist", False)
+    except ModeNotBuilt as exc:
+        check("an unknown mode names the ones that exist", "shadow" in str(exc))
+
+    # The budget has to outlive a request, or a daily cap is no cap at all.
+    first = modes.wire("shadow")
+    second = modes.wire("shadow")
+    check("every wiring shares one budget", first.budget is second.budget)
+
+    try:
+        modes.wire("shadow", "camb")
+        check("a model with no key cannot be switched on by a request", False)
+    except NotConfigured:
+        check("a model with no key cannot be switched on by a request", True)
+
+
+def test_shadow_run() -> None:
+    section("A shadow run, end to end")
+    s = TranslateSettings(provider="mock")
+    modes = ModeRegistry(s)
+    mode = modes.get("shadow")
+    rate = 48_000
+    t = np.arange(rate * 6, dtype=np.float32) / rate
+    speech = (0.2 * np.sin(2 * np.pi * 220 * t)
+              * (0.5 + 0.5 * np.sin(2 * np.pi * 3 * t))).astype(np.float32)
+
+    run = mode.run(modes.wire("shadow"), speech, rate, channel="football-31",
+                   source_language="pt-pt", target_language="en-us")
+    check("the run succeeded", run.status == "ok", run.error)
+    check("there is text for what was heard", bool(run.source_text))
+    check("and text for what was said", bool(run.target_text))
+    check("the heard audio is kept so it can be played back",
+          run.heard_audio[:4] == b"RIFF")
+    check("and so is the spoken audio", run.spoken_audio[:4] == b"RIFF")
+    check("the audio bytes stay out of the JSON the page polls",
+          "heard_audio" not in run.to_dict() and run.to_dict()["has_heard"])
+    check("each step is timed separately",
+          run.transcribe_s >= 0 and run.speak_s > 0 and run.total_s > 0)
+    check("it is labelled with the mode that produced it", run.mode == "shadow")
+
+    silent = mode.run(modes.wire("shadow"), np.zeros(rate * 5, dtype=np.float32),
+                      rate, channel="football-01")
+    check("silence is refused before anything is sent", silent.status == "skipped")
+    check("and the reason says so", "silent" in silent.error)
+    check("but the audio is still kept, so the refusal can be checked by ear",
+          bool(silent.heard_audio))
+
+    # Same language in and out: there is nothing to pay a translator for.
+    same = mode.run(modes.wire("shadow"), speech, rate, channel="football-01",
+                    source_language="en-us", target_language="en-us")
+    check("translating a language into itself is skipped", same.translate_s == 0.0)
+    check("and the text still comes through", bool(same.target_text))
+
+    # 9 s of allowance against a 6 s clip: the first run fits, the second
+    # cannot. Set from the clip length rather than guessed, which is the
+    # mistake that made an earlier version of this test assert nothing.
+    capped = TranslateSettings(provider="mock", shadow_daily_minutes=9.0 / 60.0)
+    small = ModeRegistry(capped)
+    first = small.get("shadow").run(small.wire("shadow"), speech, rate,
+                                    channel="football-01")
+    second = small.get("shadow").run(small.wire("shadow"), speech, rate,
+                                     channel="football-01")
+    check("the first run fits inside the daily cap", first.status == "ok",
+          first.error)
+    check("the second is refused by it", second.status == "skipped")
+    check("and the refusal explains which cap was hit",
+          "daily" in second.error.lower() or "cap" in second.error.lower(),
+          second.error)
+
+    failing = TranslateSettings(provider="mock")
+    reg = ModeRegistry(failing)
+    wiring = reg.wire("shadow")
+    wiring.provider = MockProvider(failing, fail_every=1)
+    broken = reg.get("shadow").run(wiring, speech, rate, channel="football-02")
+    check("a provider failure becomes a run, not an exception",
+          broken.status == "error", broken.status)
+    check("with the reason attached", bool(broken.error))
+    check("and with the audio that was sent, so it can be listened to",
+          bool(broken.heard_audio))
+
+
+def test_run_store(tmp: Path) -> None:
+    section("The run store")
+    store = RunStore(str(tmp / "runs.db"))
+    s = TranslateSettings(provider="mock")
+    modes = ModeRegistry(s)
+    rate = 16_000
+    t = np.arange(rate * 4, dtype=np.float32) / rate
+    speech = (0.2 * np.sin(2 * np.pi * 200 * t)).astype(np.float32)
+
+    run = modes.get("shadow").run(modes.wire("shadow"), speech, rate,
+                                  channel="football-31", target_language="en-us")
+    store.put(run)
+    rows = store.recent(limit=5, mode="shadow")
+    check("the run is stored", len(rows) == 1)
+    check("and its audio is flagged as present",
+          rows[0]["has_heard"] and rows[0]["has_spoken"])
+    check("the blobs are not in the listing", "heard_audio" not in rows[0])
+
+    heard = store.audio(run.id, "heard")
+    check("the heard audio comes back byte for byte",
+          heard is not None and heard[0] == run.heard_audio)
+    check("with the media type it was stored with", heard[1] == "audio/wav")
+    check("a run that does not exist gives nothing, not an error",
+          store.audio("nosuchrun", "heard") is None)
+
+    spend = store.spent_today(mode="shadow")
+    check("spending is counted from the database, so it survives a restart",
+          spend["seconds"] == round(run.seconds, 1), str(spend))
+    check("and is attributed per channel", "football-31" in spend["by_channel"])
+    check("the last credit figure the provider gave is readable",
+          store.last_credits(mode="shadow") == "0")
+
+    # Old audio is dropped while the record of what was tried stays.
+    store.KEEP_AUDIO = 2
+    for i in range(4):
+        later = modes.get("shadow").run(modes.wire("shadow"), speech, rate,
+                                        channel=f"football-{i:02d}")
+        store.put(later)
+    rows = store.recent(limit=20, mode="shadow")
+    with_audio = [r for r in rows if r["has_heard"]]
+    check("only the most recent runs keep their audio", len(with_audio) == 2,
+          f"{len(with_audio)} of {len(rows)}")
+    check("but every run is still on the record", len(rows) == 5)
+    store.close()
+
+
 def main() -> int:
     import tempfile
 
@@ -916,7 +1213,12 @@ def main() -> int:
             test_settings_and_modes()
             test_control(tmp)
             test_registry()
+            test_tts_mappers()
+            test_execution_modes()
+            test_shadow_run()
+            test_run_store(tmp)
             test_camb_adapter(base)
+            test_camb_speech(base)
             test_pipeline(tmp, base)
             test_pipeline_protects_monitoring(tmp)
             test_pipeline_failures(tmp)

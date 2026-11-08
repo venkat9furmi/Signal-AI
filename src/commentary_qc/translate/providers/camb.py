@@ -27,6 +27,7 @@ from typing import Any, Sequence
 
 from ..audio import to_wav
 from ..mappers import camb as m
+from ..mappers import tts as t
 from ..mappers.languages import LanguageMap
 from ..models import (
     AudioSegment,
@@ -35,6 +36,7 @@ from ..models import (
     OutOfCredit,
     ProviderFailed,
     RateLimited,
+    SpokenAudio,
     Transcript,
     Translation,
 )
@@ -49,7 +51,7 @@ class CambProvider:
     name = "camb"
     #: What gets recorded alongside each caption, so a change of model is
     #: visible in the data rather than inferred from the date.
-    model = "camb/transcribe+translate"
+    model = "camb/transcribe+translate+tts"
 
     def __init__(self, settings: TranslateSettings, opener: Any | None = None) -> None:
         self.settings = settings
@@ -77,6 +79,8 @@ class CambProvider:
         multipart: tuple[dict[str, str], str, bytes] | None = None,
         query: dict[str, str] | None = None,
         retries: int = 2,
+        raw: bool = False,
+        timeout: float | None = None,
     ) -> Any:
         url = f"{self.base}/{path.lstrip('/')}"
         if query:
@@ -95,9 +99,17 @@ class CambProvider:
         for attempt in range(retries + 1):
             req = urllib.request.Request(url, data=data, headers=headers, method=method)
             try:
-                with self._opener.open(req, timeout=self.settings.timeout_s) as resp:
-                    raw = resp.read()
-                return json.loads(raw.decode("utf-8")) if raw else {}
+                with self._opener.open(
+                    req, timeout=timeout or self.settings.timeout_s
+                ) as resp:
+                    payload = resp.read()
+                    headers = resp.headers
+                # Speech synthesis answers with audio and puts the only
+                # metadata it gives -- the credit cost -- in a header, so that
+                # caller needs the bytes and the headers, not parsed JSON.
+                if raw:
+                    return payload, headers
+                return json.loads(payload.decode("utf-8")) if payload else {}
             except urllib.error.HTTPError as exc:
                 payload = _read_json(exc)
                 message = m.error_message(payload, exc.code)
@@ -213,7 +225,102 @@ class CambProvider:
             latency_s=time.perf_counter() - started,
         )
 
+    # -- capability: speech ----------------------------------------------
+    def speak(self, text: str, language: str) -> SpokenAudio:
+        """Say ``text`` in ``language`` and hand back the audio bytes.
+
+        ``/tts-stream`` rather than ``/tts``: the asynchronous one is marked
+        deprecated in the reference, and it is also three round trips to this
+        one's one. The response body is the audio, which is why this is the
+        only call in the adapter that does not parse JSON.
+        """
+        started = time.perf_counter()
+        tag = self.languages_map.resolve(language) if self.languages_map.known else language
+        fmt = self.settings.camb_audio_format
+        body = t.tts_body(
+            text,
+            tag,
+            voice_id=self.settings.camb_voice_id,
+            speech_model=self.settings.camb_speech_model,
+            audio_format=fmt,
+        )
+        # A longer timeout than the job endpoints get: this one streams the
+        # whole of the audio back in the single response, so the clock has to
+        # cover synthesis as well as the request.
+        audio, headers = self._call(
+            "POST", "/tts-stream", body=body, raw=True,
+            timeout=max(self.settings.timeout_s, self.settings.job_timeout_s),
+        )
+        if not audio:
+            raise ProviderFailed("the voice API returned no audio")
+        return SpokenAudio(
+            audio=audio,
+            media_type=t.media_type(fmt),
+            voice=str(self.settings.camb_voice_id),
+            model=self.settings.camb_speech_model,
+            provider=self.name,
+            language=tag,
+            latency_s=time.perf_counter() - started,
+            credits=t.credits_required(headers),
+        )
+
+    def voices(self) -> tuple[dict, ...]:
+        """The voices this key may use."""
+        return t.voices(self._call("GET", "/list-voices"))
+
     # -- housekeeping ----------------------------------------------------
+    def capabilities(self) -> dict:
+        """What this provider's audio translation actually does.
+
+        Three chained calls rather than one, and worth stating plainly on the
+        page: Camb does have a single end-to-end dubbing endpoint, but it
+        takes a URL it can fetch the media from, and our audio is a few
+        seconds held in memory on a machine with no public address. So the
+        reachable path is recognise, translate, speak -- which has the side
+        benefit that each step's output is visible when one of them is wrong.
+        """
+        return {
+            "provider": self.name,
+            "model": self.model,
+            "voice_model": self.settings.camb_speech_model,
+            "audio_in": True,
+            "audio_out": True,
+            "steps": [
+                {
+                    "name": "Hear it",
+                    "endpoint": "POST /transcribe",
+                    "detail": "The audio is uploaded as a 16 kHz mono WAV and "
+                              "comes back as timed text in the language it was "
+                              "spoken in.",
+                },
+                {
+                    "name": "Translate it",
+                    "endpoint": "POST /translate",
+                    "detail": "The lines are translated as a batch, in order. "
+                              "Skipped when the commentary is already in the "
+                              "target language.",
+                },
+                {
+                    "name": "Speak it",
+                    "endpoint": "POST /tts-stream",
+                    "detail": f"The translation is synthesised as "
+                              f"{self.settings.camb_audio_format.upper()} audio "
+                              f"by {self.settings.camb_speech_model} and returned "
+                              f"in one response.",
+                },
+            ],
+            "not_available": [
+                {
+                    "name": "End-to-end dubbing",
+                    "endpoint": "POST /dub",
+                    "detail": "Camb can dub audio in a single call, but it "
+                              "fetches the media from a URL. Our segments live "
+                              "in memory on a host with no public address, so "
+                              "there is nothing to give it.",
+                },
+            ],
+        }
+
     def languages(self, max_age_s: float = 3600.0) -> dict[str, str]:
         """The provider's own catalogue, cached for an hour.
 

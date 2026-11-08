@@ -14,33 +14,40 @@ from typing import Any, Mapping
 
 
 class Mode:
-    """How much of the translation layer is switched on.
+    """Which execution wiring the translation endpoints run.
 
-    Three states rather than a boolean, because "working" and "trusted" are
-    different questions and the gap between them is where this feature will
-    live for a while:
+    A mode names a wiring, not a volume knob: it decides which provider is
+    built, what it may spend, where the result is kept and who is allowed to
+    see it. The endpoints are namespaced by it -- ``/api/translate/shadow/run``
+    -- so calling one is choosing the wiring rather than passing a flag that
+    something downstream might ignore. :mod:`commentary_qc.translate.modes`
+    holds the implementations.
 
     ``off``
         Nothing runs. No tap is installed on the monitors, so no audio is
         buffered and no credit can be spent. This is the default.
     ``shadow``
-        The whole pipeline runs on real commentary and every result is stored
-        and measurable -- but nothing is published. No Slack message, no
-        caption on the commentator's live view. This is how the output gets
-        judged against real matches before anyone relies on it, and with the
-        ``mock`` provider it costs nothing at all.
-    ``prod``
-        The same pipeline, with the results published.
-
-    The only difference between shadow and prod is who gets to see the output.
-    That is the point: whatever is measured in shadow is exactly what goes
-    live, so promoting it is a switch rather than a rewrite.
+        The testing wiring. Runs against real commentary, keeps the audio so
+        the output can be listened to, spends from a small deliberate budget,
+        and shows the result to nobody but whoever asked for it.
+    ``standard``
+        The production wiring. Declared, not built: see ``modes/standard.py``
+        for exactly what building it means.
     """
 
     OFF = "off"
     SHADOW = "shadow"
-    PROD = "prod"
-    ALL = (OFF, SHADOW, PROD)
+    STANDARD = "standard"
+    ALL = (OFF, SHADOW, STANDARD)
+
+    #: ``prod`` was the earlier name. Accepted so a control row written before
+    #: the rename still loads instead of failing validation at startup.
+    ALIASES = {"prod": STANDARD, "production": STANDARD, "test": SHADOW}
+
+    @classmethod
+    def normalise(cls, name: str | None) -> str:
+        key = (name or "").strip().lower()
+        return cls.ALIASES.get(key, key)
 
 
 @dataclass(slots=True)
@@ -92,6 +99,22 @@ class TranslateSettings:
     daily_minutes: float = 60.0
     #: And per channel, so one stuck channel cannot eat the whole day.
     per_channel_minutes: float = 20.0
+    #: Shadow mode's own, much smaller allowance. Separate from the figures
+    #: above on purpose: testing is a handful of short clips pressed by hand,
+    #: and the cap exists so an afternoon of trying things cannot quietly
+    #: consume a month of free credit.
+    shadow_daily_minutes: float = 10.0
+    shadow_per_channel_minutes: float = 4.0
+
+    # -- the listen-back path -------------------------------------------
+    #: How many seconds of a live channel one shadow run grabs. Long enough
+    #: to contain a whole sentence of commentary, short enough that a
+    #: mistuned run costs almost nothing.
+    grab_seconds: float = 15.0
+    #: Seconds to wait for ffmpeg to deliver that audio before giving up. A
+    #: live HLS pull starts within a second or two; a channel that has gone
+    #: off air never starts at all, and the page needs to be told so.
+    grab_timeout_s: float = 25.0
 
     # -- plumbing -------------------------------------------------------
     #: Segments waiting to be sent. Small on purpose: if the provider is
@@ -118,12 +141,34 @@ class TranslateSettings:
     camb_api_key: str = ""
     #: Camb's transcription modes: ``fast`` or ``slow``.
     camb_transcription_mode: str = "fast"
+    #: Voice the translation is spoken in. 147320 is "Gary", the documented
+    #: default; ``GET /list-voices`` is what the page offers instead of this.
+    camb_voice_id: int = 147320
+    #: Camb's synthesis models. ``mars-8.1-flash-beta`` is their current
+    #: default and the fastest, which is what matters for commentary.
+    camb_speech_model: str = "mars-8.1-flash-beta"
+    #: Container for the spoken audio. WAV because every browser plays it
+    #: without a codec question; Camb also offers flac, mp3, adts and raw PCM.
+    camb_audio_format: str = "wav"
 
     raw: dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
 
+    #: Camb's documented containers for streamed speech.
+    AUDIO_FORMATS = ("wav", "flac", "mp3", "adts", "pcm_s16le", "pcm_s32le")
+
     def __post_init__(self) -> None:
+        self.mode = Mode.normalise(self.mode)
         if self.mode not in Mode.ALL:
             raise ValueError(f"mode must be one of {Mode.ALL}, not {self.mode!r}")
+        if self.camb_audio_format not in self.AUDIO_FORMATS:
+            raise ValueError(
+                f"camb_audio_format must be one of {self.AUDIO_FORMATS}, "
+                f"not {self.camb_audio_format!r}"
+            )
+        if self.grab_seconds <= 0:
+            raise ValueError("grab_seconds must be positive")
+        if self.shadow_daily_minutes < 0 or self.shadow_per_channel_minutes < 0:
+            raise ValueError("shadow budgets cannot be negative")
         if self.provider not in self.enabled_providers:
             raise ValueError(
                 f"provider {self.provider!r} is not in enabled_providers "
@@ -160,7 +205,7 @@ class TranslateSettings:
     @property
     def publishes(self) -> bool:
         """May the output be shown to a commentator or sent to Slack?"""
-        return self.mode == Mode.PROD
+        return self.mode == Mode.STANDARD
 
     def covers(self, channel: str, claimed: bool) -> bool:
         """Should this channel be translated right now?"""
@@ -212,6 +257,19 @@ class TranslateSettings:
             data["target_language"] = env["QC_TRANSLATE_TARGET"].strip().lower()
         if env.get("QC_TRANSLATE_DAILY_MINUTES"):
             data["daily_minutes"] = float(env["QC_TRANSLATE_DAILY_MINUTES"])
+        if env.get("QC_SHADOW_DAILY_MINUTES"):
+            data["shadow_daily_minutes"] = float(env["QC_SHADOW_DAILY_MINUTES"])
+        if env.get("QC_SHADOW_SECONDS"):
+            data["grab_seconds"] = float(env["QC_SHADOW_SECONDS"])
+        # The voice and the synthesis model are environment settings so they
+        # can be changed on a deployment without editing code -- which is the
+        # whole point of the adapter being swappable.
+        if env.get("CAMB_VOICE_ID"):
+            data["camb_voice_id"] = int(env["CAMB_VOICE_ID"])
+        if env.get("CAMB_SPEECH_MODEL"):
+            data["camb_speech_model"] = env["CAMB_SPEECH_MODEL"].strip()
+        if env.get("CAMB_AUDIO_FORMAT"):
+            data["camb_audio_format"] = env["CAMB_AUDIO_FORMAT"].strip().lower()
         if env.get("CAMB_API_KEY"):
             data["camb_api_key"] = env["CAMB_API_KEY"].strip()
         if env.get("CAMB_API_BASE"):

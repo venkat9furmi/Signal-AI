@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Protocol, Sequence, runtime_checkable
 
-from .models import AudioSegment, Transcript, Translation
+from .models import AudioSegment, SpokenAudio, Transcript, Translation
 
 
 @runtime_checkable
@@ -71,4 +71,48 @@ class Provider(Transcriber, Translator, Protocol):
         ...
 
     def close(self) -> None:
+        ...
+
+
+@runtime_checkable
+class Speaker(Protocol):
+    """Text in, speech out.
+
+    The third capability, and the one that makes the result listenable. Kept
+    separate from translation for the same reason the other two are separate:
+    a provider may translate well and have no voice worth hearing, and in that
+    case the right answer is to pair two adapters rather than accept both from
+    one.
+    """
+
+    name: str
+
+    def speak(self, text: str, language: str) -> "SpokenAudio":
+        """Synthesise ``text`` in ``language`` and return the audio bytes.
+
+        Returns bytes rather than a URL. A URL would mean the audio lives on
+        the provider's host for an undocumented lifetime, and a page that
+        plays it would break silently once it expired -- so the bytes are
+        fetched once, here, and kept with the run that produced them.
+        """
+        ...
+
+
+@runtime_checkable
+class AudioTranslator(Provider, Speaker, Protocol):
+    """Everything an execution mode needs to turn commentary into speech.
+
+    Named for what it does end to end, because that is the capability being
+    offered: audio in one language in, audio in another out. Whether the
+    provider reaches that through one endpoint or three is its own business.
+    """
+
+    def capabilities(self) -> dict:
+        """What this model's audio translation actually does, in words.
+
+        Asked by the page rather than written on it. The steps differ per
+        provider -- one vendor dubs in a single call, another needs
+        recognise, translate and speak chained -- and a page that hardcoded
+        either would start lying the day the provider was swapped.
+        """
         ...

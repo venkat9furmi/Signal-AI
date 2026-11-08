@@ -219,3 +219,122 @@ class ProviderFailed(TranslateError):
 
 class JobTimeout(TranslateError):
     """An asynchronous job never reached a terminal state in time."""
+
+
+# -- audio that comes back ------------------------------------------------
+@dataclass(frozen=True, slots=True)
+class SpokenAudio:
+    """Translated speech, as bytes we can hand to an ``<audio>`` element.
+
+    The point of the whole feature is that somebody listens to it, so the
+    audio is a first-class result rather than a side effect of a text
+    translation. ``credits`` is whatever figure the provider reported for
+    this one call, kept verbatim as a string: Camb returns it in an
+    ``X-Credits-Required`` header and publishes no balance endpoint, so this
+    is the only honest number available and inventing a unit for it would be
+    worse than passing it through.
+    """
+
+    audio: bytes = b""
+    media_type: str = "audio/wav"
+    voice: str = ""
+    model: str = ""
+    provider: str = ""
+    language: str = ""
+    latency_s: float = 0.0
+    credits: str = ""
+
+    def __bool__(self) -> bool:
+        return bool(self.audio)
+
+
+@dataclass(frozen=True, slots=True)
+class TranslationRun:
+    """One deliberate end-to-end attempt: audio in, translated audio out.
+
+    This is what an execution mode produces and what the page shows. It keeps
+    both ends of the work -- the audio that was heard and the audio that was
+    produced -- because the only way to judge a translation of live commentary
+    is to listen to the two one after the other.
+
+    A failure is a run too, with ``status`` saying so. A run that vanished
+    because the provider refused looks identical to one that was never
+    started, and that ambiguity is what makes a model feel unreliable when it
+    is actually just unpaid.
+    """
+
+    id: str
+    created: float
+    mode: str
+    channel: str = ""
+    seconds: float = 0.0
+    provider: str = ""
+    model: str = ""
+    voice: str = ""
+    source_language: str = ""
+    source_text: str = ""
+    target_language: str = ""
+    target_text: str = ""
+    status: str = "ok"
+    error: str = ""
+    transcribe_s: float = 0.0
+    translate_s: float = 0.0
+    speak_s: float = 0.0
+    total_s: float = 0.0
+    credits: str = ""
+    source_url: str = ""
+    heard_audio: bytes = field(default=b"", compare=False, repr=False)
+    spoken_audio: bytes = field(default=b"", compare=False, repr=False)
+    heard_type: str = "audio/wav"
+    spoken_type: str = "audio/wav"
+
+    @property
+    def ok(self) -> bool:
+        return self.status == "ok"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Everything but the audio.
+
+        The blobs are deliberately excluded: they are fetched by their own URL
+        so the browser can stream them into a player and cache them, rather
+        than base64 in a JSON body that has to be re-sent on every poll.
+        """
+        return {
+            "id": self.id,
+            "created": self.created,
+            "mode": self.mode,
+            "channel": self.channel,
+            "seconds": round(self.seconds, 2),
+            "provider": self.provider,
+            "model": self.model,
+            "voice": self.voice,
+            "source_language": self.source_language,
+            "source_text": self.source_text,
+            "target_language": self.target_language,
+            "target_text": self.target_text,
+            "status": self.status,
+            "error": self.error,
+            "transcribe_s": round(self.transcribe_s, 2),
+            "translate_s": round(self.translate_s, 2),
+            "speak_s": round(self.speak_s, 2),
+            "total_s": round(self.total_s, 2),
+            "credits": self.credits,
+            "source_url": self.source_url,
+            "has_heard": bool(self.heard_audio),
+            "has_spoken": bool(self.spoken_audio),
+            "heard_type": self.heard_type,
+            "spoken_type": self.spoken_type,
+        }
+
+
+class ModeNotBuilt(TranslateError):
+    """An execution mode exists in the registry but has no implementation.
+
+    Deliberately an error and not a silent fall back to another mode: asking
+    for production and quietly getting the test wiring is the one failure that
+    would be impossible to notice from the outside.
+    """
+
+
+class NoAudio(TranslateError):
+    """There was nothing worth sending -- silence, or a channel off air."""

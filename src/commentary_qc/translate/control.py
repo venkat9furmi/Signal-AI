@@ -1,7 +1,7 @@
 """The runtime switch, shared between two processes.
 
 The page runs in the web container and the pipeline runs in the recorder. When
-someone moves the mode from shadow to prod, or swaps the provider, that has to
+someone moves the mode from shadow to standard, or swaps the provider, that has to
 cross a process boundary.
 
 It crosses the same way a claim does, and for the same reason: the web app owns
@@ -78,7 +78,7 @@ def write(
     """
     current = read(path)
     new = {
-        "mode": (mode if mode is not None else current["mode"]).strip().lower(),
+        "mode": Mode.normalise(mode if mode is not None else current["mode"]),
         "provider": (provider if provider is not None else current["provider"]).strip().lower(),
         "target": (target if target is not None else current["target"]).strip().lower(),
         "channels": list(channels) if channels is not None else list(current["channels"]),
@@ -152,7 +152,7 @@ def read(path: str | None) -> dict[str, Any]:
     except json.JSONDecodeError:
         channels = []
     return {
-        "mode": row["mode"] or Mode.OFF,
+        "mode": Mode.normalise(row["mode"]) or Mode.OFF,
         "provider": row["provider"] or "mock",
         "target": row["target"] or "en-us",
         "channels": list(channels),
@@ -173,7 +173,7 @@ def apply(settings: TranslateSettings, control: dict) -> TranslateSettings:
     """
     import dataclasses
 
-    mode = control.get("mode") or settings.mode
+    mode = Mode.normalise(control.get("mode")) or settings.mode
     provider = control.get("provider") or settings.provider
     if provider not in settings.enabled_providers:
         log.warning(

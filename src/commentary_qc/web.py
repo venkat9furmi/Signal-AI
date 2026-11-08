@@ -47,6 +47,8 @@ from .scanner import LiveScanner, describe
 from .store import EventStore
 from .translate import api as translate_api
 from .translate import control as translate_control
+from .translate.modes import ModeRegistry
+from .translate.runs import RunStore
 from .translate.settings import TranslateSettings
 
 log = logging.getLogger(__name__)
@@ -273,13 +275,19 @@ def create_app(
     scanner = LiveScanner(settings.source).start()
     feed = FixtureFeed().start()
 
-    # The translation layer's runtime switch rides in the claims file, for the
-    # same reason claims do: this process owns that file, and the recorder only
-    # reads it. One writer per database is the rule that made claim-starts-
-    # monitoring work, so switching models reuses it rather than inventing a
-    # second channel between the two containers.
+    # The translation layer. Its execution modes are built once per process,
+    # because a mode holds the thing that has to outlive a request: its
+    # spending budget. Runs go in a third database file -- the page produces
+    # them, so the page owns the file, which is the one-writer-per-file rule
+    # the rest of this system already runs on.
     translate_settings = TranslateSettings.from_env()
     translate_control.ensure(claims_db)
+    translate_modes = ModeRegistry(translate_settings)
+    # Beside the claims file, so it lands on the same named volume. Never a
+    # host bind mount: SQLite in WAL mode needs shared memory a Windows mount
+    # cannot provide, which cost this project a day of a page reporting a
+    # false outage while the data was in fact being written perfectly.
+    translate_runs = RunStore(str(Path(claims_db).parent / "translate.db"))
     th = settings.thresholds
     targets = {
         "quiet": th.too_quiet_lufs, "quiet_clear": th.too_quiet_clear_lufs,
@@ -295,11 +303,17 @@ def create_app(
         feed.stop()
         store.close()
         claims.close()
+        translate_runs.close()
 
     app = FastAPI(title="Commentary QC", lifespan=lifespan)
     app.include_router(
         translate_api.build_router(
-            store, translate_settings, claims_db, registry, claims
+            translate_settings,
+            translate_modes,
+            translate_runs,
+            registry=registry,
+            source=settings.source,
+            ffmpeg_bin=settings.ffmpeg_bin,
         )
     )
     page = Path(__file__).parent / "static" / "claim.html"
@@ -456,12 +470,12 @@ def create_app(
 
     @app.get("/translate", response_class=HTMLResponse)
     def translate_view() -> str:
-        """The translation console: the mode switch, the models and the output.
+        """Shadow mode: try the model on a channel and listen to the result.
 
         A separate page rather than another panel on the commentator view. A
-        commentator on air needs one instruction at a time; whoever is deciding
-        whether a model is good enough needs latency, cost and a side-by-side
-        of every caption. Those are different jobs.
+        commentator on air needs one instruction at a time; whoever is judging
+        whether a model is worth publishing needs to hear both sides of a
+        translation. Those are different jobs.
         """
         return translate_page.read_text(encoding="utf-8")
 

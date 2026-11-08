@@ -44,22 +44,37 @@ def available() -> list[str]:
     return sorted(FACTORIES)
 
 
-def build(name: str, settings: TranslateSettings) -> Any:
-    """Construct a provider by name, refusing one that is not switched on.
+def blocked_reason(name: str, settings: TranslateSettings) -> str:
+    """Why this adapter cannot be used right now, or an empty string.
 
-    ``enabled_providers`` is checked here rather than at the call site so
-    there is one gate: a paid model cannot be reached by any path -- the page,
-    the config file or a stray environment variable -- unless it was enabled
-    deliberately.
+    One function so the page and the builder can never disagree. They did:
+    ``describe`` told the page Camb was unselectable without a key while
+    ``build`` happily returned one, which meant a request naming it got as far
+    as capturing fifteen seconds of audio before failing on the first call.
     """
     key = (name or "").strip().lower()
     if key not in FACTORIES:
-        raise NotConfigured(f"no such provider: {name!r} (have {available()})")
+        return f"no such provider (have {available()})"
     if key not in settings.enabled_providers:
-        raise NotConfigured(
-            f"provider {key!r} is not enabled; enabled_providers is "
-            f"{list(settings.enabled_providers)}"
-        )
+        return (f"not enabled; enabled_providers is "
+                f"{list(settings.enabled_providers)}")
+    if key == "camb" and not settings.camb_api_key:
+        return "CAMB_API_KEY is not set"
+    return ""
+
+
+def build(name: str, settings: TranslateSettings) -> Any:
+    """Construct a provider by name, refusing one that cannot work.
+
+    Checked here rather than at the call site so there is one gate: a paid
+    model cannot be reached by any path -- the page, the config file or a
+    stray environment variable -- unless it was enabled deliberately and has
+    what it needs to run.
+    """
+    key = (name or "").strip().lower()
+    reason = blocked_reason(key, settings)
+    if reason:
+        raise NotConfigured(f"provider {key!r} cannot be used: {reason}")
     return FACTORIES[key](settings)
 
 
@@ -69,11 +84,7 @@ def describe(settings: TranslateSettings) -> list[dict]:
     for name in available():
         info = dict(DESCRIPTIONS.get(name, {}))
         enabled = name in settings.enabled_providers
-        blocked = ""
-        if not enabled:
-            blocked = "not in enabled_providers"
-        elif name == "camb" and not settings.camb_api_key:
-            blocked = "CAMB_API_KEY is not set"
+        blocked = blocked_reason(name, settings)
         out.append({
             "name": name,
             "title": info.get("title", name),
@@ -87,4 +98,5 @@ def describe(settings: TranslateSettings) -> list[dict]:
     return out
 
 
-__all__ = ["FACTORIES", "available", "build", "describe", "CambProvider", "MockProvider"]
+__all__ = ["FACTORIES", "available", "blocked_reason", "build", "describe",
+           "CambProvider", "MockProvider"]
