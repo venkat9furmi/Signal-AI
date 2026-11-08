@@ -103,8 +103,14 @@ class TranslateSettings:
     #: above on purpose: testing is a handful of short clips pressed by hand,
     #: and the cap exists so an afternoon of trying things cannot quietly
     #: consume a month of free credit.
-    shadow_daily_minutes: float = 10.0
-    shadow_per_channel_minutes: float = 4.0
+    #:
+    #: 5 minutes because Camb's free plan grants **6 minutes of API speech to
+    #: text in total, once** - not per month and not per day. So this cap is
+    #: the wrong shape to protect it: one day at 10 minutes would have spent
+    #: the whole allowance. It is set to survive a single day of testing, and
+    #: anyone on a paid plan should raise it deliberately.
+    shadow_daily_minutes: float = 5.0
+    shadow_per_channel_minutes: float = 2.0
 
     # -- the listen-back path -------------------------------------------
     #: How many seconds of a live channel one shadow run grabs. Long enough
