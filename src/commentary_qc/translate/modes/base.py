@@ -52,6 +52,11 @@ class ModeInfo:
     publishes: bool = False
     #: Is the audio kept so somebody can listen to it afterwards?
     retains_audio: bool = False
+    #: Can this mode stream a channel as it happens, as opposed to
+    #: translating a recorded clip? Declared rather than inferred: the page
+    #: offers a live control on the strength of it, and a mode advertising one
+    #: it had not built would be a dead button.
+    live: bool = False
     #: Why it is not built, when it is not.
     pending: str = ""
 

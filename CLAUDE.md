@@ -654,3 +654,146 @@ unverified until a real key answers.
 noise (Ch.31 repeating an identical `clipping` message for ~6 min before
 `filler_playing` caught up). It is an `engine.py` sequencing change that affects
 live alerting, so it waits for a decision.
+
+## Session 7 - 2026-11-08: live translation
+
+**The point of the feature is live, and the clip path was never it.** Session 6
+built transcribe -> translate -> speak as three REST calls, which answers "does
+this model understand football commentary" from a recorded clip. It cannot
+answer "can it keep up with a match", and that is the question. So live is
+built, on Camb's realtime WebSocket, and it is the primary control on the page.
+
+**The endpoint is `wss://realtime.camb.ai/v1/realtime`** - a wholly different
+protocol and a different host from the REST adapter, so none of that plumbing
+is reused and pointing `camb_base_url` at a fake does not redirect it.
+
+- Auth is the `x-api-key` **request header**. The docs also allow a key in the
+  first message; we never do, because it would land in any transcript of the
+  session.
+- `mode` goes in the query string **and** the session message. Documented
+  precedence is session, then query, then the `fast` default, so the two
+  agreeing costs nothing and matters most for `slow`, where silently falling
+  back to `fast` would mean a language quietly refused.
+- Audio **up** is base64 inside JSON (`input_audio_buffer.append`) - the server
+  **ignores binary frames from the client**. Costs a third in bandwidth and is
+  not negotiable. 256 KiB decoded per append.
+- Audio **down**: the docs contradict themselves. The AsyncAPI schema and the
+  Python SDK say a raw binary frame with no `type` field; the reference prose
+  and the Chatterbox page say a JSON event with a base64 `delta`.
+  `parse_event` accepts **both**, because guessing wrong gives a session that
+  connects, reports progress and produces no audio.
+- `input_audio_buffer.commit` is recognised but **not supported** - the server
+  answers with an error and carries on. There is no flush and no end-of-turn.
+- Wire format is 24 kHz mono PCM16 both ways (SDK-documented; the protocol
+  reference never states it). `FFmpegSource` gained an optional `rate` so the
+  live tap asks ffmpeg for 24 kHz directly - better than upsampling a 48 kHz
+  decode that has already been resampled once.
+
+**Threads, not asyncio.** `websockets.sync` gives a blocking client whose
+`send` and `recv` may be used from different threads, which is the shape
+needed: the caller feeds audio at the rate it arrives while a reader thread
+drains the far end into a queue. A loop that blocked on `recv` between chunks
+would stop feeding the session, and the server answers that with
+`client_too_slow`. `websockets>=13` is now in requirements.txt - it was already
+present via uvicorn on dev machines but the image installs only what is listed.
+
+### The finding that matters for MMC
+
+**Italian and Greek are not in the realtime language list.** The reference
+prints fourteen - ar-ae/eg/sa, de-de, en-gb, en-us, es-es, fr-ca, fr-fr, hi-in,
+ja-jp, ko-kr, pt-br, zh-cn - and `it-it` and `el-gr` are absent. That is
+**20 of the 52 channels** (Italian 9, Greek 11). English, French, German and
+Portuguese (via pt-br) are covered: 32 channels.
+
+The docs say slow mode "supports the full language list" and fast mode fewer,
+but **never print either per-mode list**, so which of the three this is remains
+unresolved. The code therefore **warns rather than refuses**: an undocumented
+language that works is likelier than this list being complete, and a real
+session is the only way to settle it. `rt.supported()` returns the warning and
+the page shows it above the Start button.
+
+### What was built
+
+- `mappers/realtime.py` - the whole protocol as pure functions, no socket.
+  Message shapes, both audio transports, the error-code tables, and
+  `error_for()` mapping server codes onto our exceptions so no-credit latches
+  the budget, a rate limit is retried and a key problem reads as configuration.
+  **An unknown error code is treated as fatal**: the server closes the socket
+  on most of them, and streaming into a dead session would report no fault.
+- `providers/camb_realtime.py` - the socket, the reader thread, the lifecycle.
+- `providers/mock_realtime.py` - a free session shaped like the real one: not
+  ready the instant it opens, answers in bursts rather than per chunk, returns
+  audio at the wire rate, refuses an oversized append. Chimes, not speech, so
+  the stand-in is never mistaken for a model that got the commentary wrong.
+- `live.py` - `LiveRun` (one thread: ffmpeg in, session out, captions and audio
+  collected) and `LiveRunner` (**one session at a time by default**, because
+  Camb's free plan documents API concurrency of 1 and a second session is
+  otherwise refused by the far end only after audio has started flowing).
+- `ports.py` - `LiveSession` and `LiveTranslator`, kept apart from
+  `AudioTranslator` because live and file are separately available, separately
+  priced and carry different languages.
+- Endpoints: `POST/GET /api/translate/shadow/live`,
+  `POST .../live/{id}/stop`, `GET .../live/{id}/audio/{heard|spoken}`.
+  `standard` answers 501 as before.
+- The page keeps its four sections; section 3 is now two tabs, **Live first**
+  and the clip path second.
+
+**The budget is enforced against the clock**, re-checked every 5 s, because a
+realtime session is billed in windows rather than per call - there is no request
+boundary to check at. `live_seconds` (default 60) is a hard ceiling so a session
+somebody opened and walked away from cannot run the four hours the protocol
+allows. The web process stops every live session on shutdown; one it forgot
+would hold an ffmpeg pull and a metered socket open until the container died.
+
+### Two things only the real endpoint revealed
+
+1. **A refused key can close the session with no reason at all** - the upgrade
+   is accepted, then the connection drops with no error event and no close
+   frame, so there is nothing to report but close code 1006. The fake server
+   could not show this because it was written from the docs, where every
+   documented failure sends an `error` event first. Now: a session that closes
+   before `session.created` without naming a reason is reported as a key or
+   plan problem and says which setting to check. A second attempt *did* get the
+   documented `invalid_api_key` event, so both paths happen and both are
+   handled.
+2. **Audio played back while a session is still running** needs the player
+   built once per session. Rebuilding it on each poll restarts playback from
+   the beginning every 1.5 s, which makes a live translation impossible to
+   actually listen to.
+
+### Verified
+
+- `tests/test_live_translate.py`, **112 checks**, including the real adapter
+  against a **fake Camb realtime WebSocket on localhost**: handshake, the
+  header, both audio transports, no-credit, a rejected key, an unsupported
+  language, a session that never boots, a mid-stream failure, a survivable
+  error that must *not* tear the session down, and the reasonless close. No key
+  and no credit.
+- Live on `football-41` (German) with the mock model: 31 s of real commentary
+  at 24 kHz, paced 1:1, heard RMS 0.028 (quiet, as this platform's live
+  commentary always is), captions paired, both sides playable WAV, a second
+  session refused with the channel that held the slot.
+- Over HTTP end to end: 202 on start, translated audio served **while the
+  session was still running** (48 KB at 2 s, 480 KB at the end), 409 for a
+  second session, 404 for an unknown mode, 501 for `standard`, the finished run
+  filed as `kind="live"` without anybody polling for it.
+- `translate.db` gained a `kind` column with an additive migration, since
+  `CREATE TABLE IF NOT EXISTS` does nothing to a table that already exists.
+  Audio pruning now also has a **byte budget** (192 MB): the row count was
+  enough when every run was a 15 s clip, but a live run is minutes of audio on
+  both sides.
+- 202 checks in `test_translate.py` still pass.
+
+**Still the `mock` provider.** Everything above is proven except a successful
+real session, which needs `CAMB_API_KEY`. Camb's free plan is **6 minutes of
+API speech to text in total, once** - so `shadow_daily_minutes` is 5 and
+`live_seconds` 60, and the first real session should be spent on a channel
+carrying an actual match in a language on the list (German or French), not on a
+holding clip.
+
+**Not a code question, and it blocks production**: Camb's terms name gambling
+as prohibited content (s.13.3(b)) and restrict distributing Platform output to
+third parties (s.13.3(j)(i), s.13.4); our output would reach bet365's
+customers. s.10.5 makes uploaded audio model-training data. And live streaming
+on their published plans is Expert only, $900/month for 24 minutes and one
+stream. See memory `camb-ai-plans-and-terms`.

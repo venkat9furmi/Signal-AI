@@ -31,7 +31,9 @@ from ..models import (
     Translation,
     Utterance,
 )
+from ..mappers import realtime as rt
 from ..settings import TranslateSettings
+from .mock_realtime import MockLiveSession
 
 #: Football words, so a shadow transcript reads like commentary at a glance
 #: and an obviously wrong segmentation is visible by eye.
@@ -191,6 +193,51 @@ class MockProvider:
                  "description": "One beep per word. Not a voice."},)
 
     # -- housekeeping ----------------------------------------------------
+    def open_live(
+        self,
+        source: str,
+        target: str,
+        *,
+        mode: str = rt.FAST,
+        voice_id: int | None = None,
+    ) -> MockLiveSession:
+        """A free session shaped like the real one. See mock_realtime."""
+        return MockLiveSession(source, target, mode=mode)
+
+    def live_languages(self) -> tuple[str, ...]:
+        """Everything the real provider lists, plus the two it does not.
+
+        Italian and Greek are added on purpose: half of what the live path has
+        to be tested for is what happens on a channel whose language the real
+        provider may refuse, and a stand-in that quietly supported nothing
+        unusual would never exercise that.
+        """
+        return rt.REALTIME_LANGUAGES + ("it-it", "el-gr")
+
+    def live_capabilities(self) -> dict:
+        return {
+            "provider": self.name,
+            "model": "mock/realtime-chime",
+            "transport": "in-process",
+            "endpoint": "none -- nothing leaves this machine",
+            "modes": [
+                {"name": rt.FAST, "detail": "Ready in a fraction of a second."},
+                {"name": rt.SLOW, "detail": "Identical here; the real one boots slowly."},
+            ],
+            "wire": {"rate": rt.WIRE_RATE, "format": "PCM16 mono"},
+            "languages": list(self.live_languages()),
+            "limits": {
+                "max_session_s": rt.MAX_SESSION_S,
+                "idle_s": rt.IDLE_LIMIT_S,
+                "setup_s": rt.SETUP_DEADLINE_S,
+            },
+            "caveats": [
+                "This is the offline stand-in. It answers every few seconds "
+                "with a chime and a fixed phrase, so it proves the streaming "
+                "path works and says nothing about translation quality.",
+            ],
+        }
+
     def capabilities(self) -> dict:
         return {
             "provider": self.name,

@@ -36,6 +36,8 @@ from ..config import SourceConfig
 from ..discovery import ProbeFailed, StreamNotFound
 from . import providers as provider_registry
 from .grab import grab as grab_audio
+from .live import AtCapacity, LiveRunner
+from .mappers import realtime as rt
 from .mappers.languages import tag_for_channel
 from .models import ModeNotBuilt, NoAudio, NotConfigured, TranslateError
 from .modes import ModeRegistry
@@ -55,6 +57,21 @@ class RunIn(BaseModel):
     source_language: str = "auto"
 
 
+class LiveIn(BaseModel):
+    """Start a live session. Same guarantee as RunIn: nothing here chooses
+    which account is billed."""
+
+    channel: str = Field(default="", description="Channel to translate, e.g. football-41")
+    seconds: float | None = Field(
+        default=None, ge=10.0, le=1800.0,
+        description="Hard limit on the session, in seconds.",
+    )
+    target: str = ""
+    provider: str = ""
+    source_language: str = "auto"
+    live_mode: str = Field(default="", description="fast or slow")
+
+
 def build_router(
     settings: TranslateSettings,
     modes: ModeRegistry,
@@ -66,6 +83,11 @@ def build_router(
 ) -> APIRouter:
     router = APIRouter(prefix="/api/translate", tags=["translate"])
     src = source or SourceConfig()
+    live_runs = LiveRunner(runs, max_concurrent=settings.live_concurrent)
+    # Hung off the router so the app can wind sessions up on shutdown. A live
+    # session the process forgot about would keep an ffmpeg pull and a paid
+    # socket open until the container died.
+    router.live_runs = live_runs  # type: ignore[attr-defined]
 
     def mode_or_501(name: str):
         try:
@@ -117,6 +139,24 @@ def build_router(
         except Exception as exc:  # noqa: BLE001 - describing must not fail
             out["capabilities"] = {}
             out["capabilities_error"] = str(exc)[:200]
+        out["live"] = {
+            "available": bool(info.live and hasattr(wiring.provider, "open_live")),
+            "mode": wiring.settings.live_mode,
+            "seconds": wiring.settings.live_seconds,
+            "concurrent": wiring.settings.live_concurrent,
+        }
+        describe_live = getattr(wiring.provider, "live_capabilities", None)
+        if describe_live is not None:
+            try:
+                out["live"]["capabilities"] = describe_live()
+            except Exception as exc:  # noqa: BLE001
+                out["live"]["capabilities_error"] = str(exc)[:200]
+        elif out["live"]["available"]:
+            out["live"]["available"] = False
+            out["live"]["why"] = (
+                f"{wiring.provider.name} offers no live translation, only the "
+                f"clip path"
+            )
         try:
             out["health"] = wiring.provider.healthcheck()
         except Exception as exc:  # noqa: BLE001
@@ -256,6 +296,163 @@ def build_router(
         out = result.to_dict()
         out["gaps"] = captured.gaps
         return JSONResponse(out)
+
+    # -- live --------------------------------------------------------------
+    @router.post("/{mode}/live")
+    def live_start(mode: str, body: LiveIn) -> JSONResponse:
+        """Open a realtime session on a channel and start streaming it.
+
+        Returns as soon as the session is accepted, not when it finishes --
+        the whole point is that it runs while a match does. The page polls
+        ``GET`` for captions and can play the translated audio while it is
+        still arriving.
+        """
+        info = mode_or_501(mode).info
+        if not info.live:
+            raise HTTPException(
+                501, f"{info.name} mode has no live path" + (
+                    f": {info.pending}" if info.pending else ""
+                )
+            )
+        if not body.channel:
+            raise HTTPException(400, "say which channel to translate")
+
+        wiring = wire_or_501(mode, body.provider)
+        if not hasattr(wiring.provider, "open_live"):
+            name = wiring.provider.name
+            wiring.close()
+            raise HTTPException(
+                400,
+                f"{name} offers no live translation, only the clip path. "
+                f"Switch the model to one that does.",
+            )
+        try:
+            run = modes.get(mode).live(
+                wiring,
+                body.channel,
+                source=src,
+                ffmpeg_bin=ffmpeg_bin,
+                source_language=body.source_language or "auto",
+                target_language=body.target,
+                live_mode=body.live_mode,
+                seconds=body.seconds or 0.0,
+            )
+        except (NotConfigured, TranslateError) as exc:
+            wiring.close()
+            raise HTTPException(400, str(exc)) from exc
+
+        try:
+            live_runs.start(run)
+        except AtCapacity as exc:
+            # 409, not 429: nothing is rate limited, something else simply has
+            # the one session this plan allows.
+            wiring.close()
+            raise HTTPException(409, str(exc)) from exc
+        return JSONResponse(run.snapshot(), status_code=202)
+
+    @router.get("/{mode}/live")
+    def live_state(mode: str, id: str = "") -> JSONResponse:
+        """The current session, or the one named by ``id``.
+
+        Also reports the languages the live path accepts, which are *not* the
+        ones the clip path accepts -- showing the clip list beside a live
+        control is how somebody picks a language that is only refused once a
+        match has started.
+        """
+        info = mode_or_501(mode).info
+        run = live_runs.get(id) if id else live_runs.current()
+        return JSONResponse({
+            "mode": info.to_dict(),
+            "live": run.snapshot() if run is not None else None,
+            "history": [
+                {
+                    "id": r.id,
+                    "channel": r.channel,
+                    "phase": r.phase,
+                    "running": r.running,
+                    "elapsed_s": round((r.ended or r.started) - r.started, 1),
+                    "spoken_seconds": round(r.spoken_seconds, 1),
+                    "error": r.error,
+                }
+                for r in live_runs.all()
+            ],
+            "limits": {
+                "seconds": settings.live_seconds,
+                "concurrent": settings.live_concurrent,
+                "modes": list(rt.MODES),
+                "default_mode": settings.live_mode,
+            },
+            "languages": _live_languages(mode),
+        })
+
+    @router.post("/{mode}/live/{run_id}/stop")
+    def live_stop(mode: str, run_id: str) -> JSONResponse:
+        """Wind a session up. The tail is still collected, so the last
+        sentence is not lost."""
+        mode_or_501(mode)
+        run = live_runs.get(run_id)
+        if run is None:
+            raise HTTPException(404, f"no live run {run_id}")
+        run.stop("stopped from the page")
+        return JSONResponse(run.snapshot())
+
+    @router.get("/{mode}/live/{run_id}/audio/{which}")
+    def live_audio(mode: str, run_id: str, which: str) -> Response:
+        """Audio from a session, playable while it is still running.
+
+        Served from the run in memory rather than from the database: a session
+        is not written to the store until it ends, and waiting two minutes to
+        hear any of a live translation would defeat the point of testing one.
+        A finished run falls through to the stored copy.
+        """
+        mode_or_501(mode)
+        if which not in ("heard", "spoken"):
+            raise HTTPException(404, "audio is either 'heard' or 'spoken'")
+        run = live_runs.get(run_id)
+        blob = b""
+        if run is not None:
+            blob = run.spoken_wav() if which == "spoken" else run.heard_wav()
+        if not blob:
+            found = runs.audio(run_id, which)
+            if found is None or not found[0]:
+                raise HTTPException(
+                    404, f"no {which} audio for live run {run_id} yet"
+                )
+            blob = found[0]
+        return Response(
+            content=blob,
+            media_type="audio/wav",
+            headers={
+                "content-disposition": f'inline; filename="{run_id}-{which}.wav"',
+                # Deliberately not cached: a running session grows, so the
+                # bytes behind this URL are different a second later.
+                "cache-control": "no-store",
+            },
+        )
+
+    def _live_languages(mode: str) -> dict[str, Any]:
+        """What the live path accepts, and the caveat that goes with it."""
+        try:
+            wiring = wire_or_501(mode)
+        except HTTPException:
+            return {"tags": [], "note": ""}
+        try:
+            getter = getattr(wiring.provider, "live_languages", None)
+            tags = list(getter()) if getter is not None else []
+        except Exception:  # noqa: BLE001
+            tags = list(rt.REALTIME_LANGUAGES)
+        finally:
+            wiring.close()
+        return {
+            "tags": sorted(tags),
+            "note": "Camb publishes one list of realtime languages and says "
+                    "slow mode carries more, without printing either per-mode "
+                    "list. Italian and Greek are absent from the published "
+                    "list, which is 20 of MMC's 52 channels.",
+            "missing": [
+                tag for tag in ("it-it", "el-gr") if tag not in tags
+            ],
+        }
 
     @router.get("/{mode}/runs")
     def recent(mode: str, limit: int = 12, channel: str | None = None) -> JSONResponse:

@@ -266,6 +266,11 @@ class TranslationRun:
     id: str
     created: float
     mode: str
+    #: ``clip`` for the three-call file path, ``live`` for a realtime session.
+    #: The two produce the same record and are listed together, but they are
+    #: different products with different languages and different billing, so
+    #: a run has to say which one it was.
+    kind: str = "clip"
     channel: str = ""
     seconds: float = 0.0
     provider: str = ""
@@ -303,6 +308,7 @@ class TranslationRun:
             "id": self.id,
             "created": self.created,
             "mode": self.mode,
+            "kind": self.kind,
             "channel": self.channel,
             "seconds": round(self.seconds, 2),
             "provider": self.provider,

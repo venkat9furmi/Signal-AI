@@ -67,6 +67,49 @@
   .tag.na { background: var(--line); color: var(--muted); }
 
   section { margin: 30px 0 0; }
+
+  /* the live / clip switch */
+  .tabs { display: flex; gap: 6px; margin: 0 0 16px; flex-wrap: wrap; }
+  .tab {
+    background: transparent; color: var(--dim); border: 1px solid var(--line);
+    padding: 7px 14px; font: inherit; font-size: 13px; letter-spacing: .04em;
+    text-transform: uppercase; cursor: pointer; border-radius: 2px;
+  }
+  .tab:hover { color: var(--yellow); border-color: var(--yellow); }
+  .tab.on { background: var(--yellow); color: #000; border-color: var(--yellow); }
+
+  /* what a running session looks like */
+  .phase {
+    display: inline-block; padding: 3px 10px; border-radius: 2px;
+    font-size: 12px; letter-spacing: .06em; text-transform: uppercase;
+    border: 1px solid currentColor;
+  }
+  .phase.waiting { color: var(--dim); }
+  .phase.going   { color: var(--good); }
+  .phase.ended   { color: var(--yellow); }
+  .phase.broke   { color: var(--bad); }
+  .pulse { animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
+  @media (prefers-reduced-motion: reduce) { .pulse { animation: none } }
+
+  .caps { margin: 14px 0 0; max-height: 260px; overflow-y: auto; }
+  .cap {
+    border-top: 1px solid var(--line); padding: 8px 0;
+    display: grid; grid-template-columns: 54px 1fr 1fr; gap: 12px;
+    align-items: baseline;
+  }
+  .cap:first-child { border-top: 0; }
+  .cap .t { color: var(--dim); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .cap .h { color: var(--dim); }
+  .cap .s { color: var(--fg); }
+  @media (max-width: 680px) {
+    .cap { grid-template-columns: 54px 1fr; }
+    .cap .s { grid-column: 2; }
+  }
+  .warn-box {
+    border-left: 3px solid var(--warn); padding: 8px 12px; margin: 14px 0 0;
+    color: var(--warn); font-size: 14px; background: rgba(255,180,0,.06);
+  }
   h2 {
     font-family: "Barlow Condensed", sans-serif; font-size: 13px;
     text-transform: uppercase; letter-spacing: .18em; color: var(--muted);
@@ -219,25 +262,51 @@
   </section>
 
   <section>
-    <h2>3 &middot; Run it</h2>
+    <h2>3 &middot; Translate it</h2>
     <div class="card">
-      <div class="form">
-        <div style="flex:2 1 220px">
-          <label for="channel">Channel</label>
-          <select id="channel" style="width:100%"></select>
-        </div>
-        <div style="flex:1 1 150px">
-          <label for="target">Translate into</label>
-          <select id="target" style="width:100%"></select>
-        </div>
-        <div style="flex:0 1 110px">
-          <label for="seconds">Seconds</label>
-          <input id="seconds" type="number" min="3" max="60" step="1" value="15"
-                 style="width:100%">
-        </div>
-        <button id="go">Translate</button>
+      <div class="tabs">
+        <button class="tab on" id="tab-live">Live, as it happens</button>
+        <button class="tab" id="tab-clip">A recorded clip</button>
       </div>
-      <p class="status" id="status"></p>
+
+      <div id="pane-live">
+        <div class="form">
+          <div style="flex:2 1 220px">
+            <label for="channel">Channel</label>
+            <select id="channel" style="width:100%"></select>
+          </div>
+          <div style="flex:1 1 150px">
+            <label for="target">Translate into</label>
+            <select id="target" style="width:100%"></select>
+          </div>
+          <div style="flex:0 1 120px">
+            <label for="live-seconds">Stop after</label>
+            <input id="live-seconds" type="number" min="10" max="1800" step="10"
+                   value="60" style="width:100%">
+          </div>
+          <button id="go-live">Start</button>
+          <button id="stop-live" hidden>Stop</button>
+        </div>
+        <p class="status" id="live-status"></p>
+        <div id="live-warn"></div>
+      </div>
+
+      <div id="pane-clip" hidden>
+        <div class="form">
+          <div style="flex:0 1 110px">
+            <label for="seconds">Seconds</label>
+            <input id="seconds" type="number" min="3" max="60" step="1" value="15"
+                   style="width:100%">
+          </div>
+          <button id="go">Translate a clip</button>
+        </div>
+        <p class="note">
+          Records a few seconds, then transcribes, translates and speaks it in
+          three separate calls. Slower than real time and a different product
+          from the live path &mdash; different languages, different billing.
+        </p>
+        <p class="status" id="status"></p>
+      </div>
     </div>
   </section>
 
@@ -245,7 +314,7 @@
     <h2>4 &middot; Listen</h2>
     <div class="card" id="listen">
       <p class="sub" style="margin:0">
-        Nothing yet. Pick a channel that is on air and press Translate.
+        Nothing yet. Pick a channel that is on air and press Start.
       </p>
     </div>
     <div class="scroll">
@@ -313,6 +382,9 @@ async function loadModel() {
       <p>${esc(s.detail)}</p>
     </div>`).join("");
   const others = (d.providers || []).filter((p) => p.name !== d.provider);
+  const live = d.live || {};
+  const lc = live.capabilities || {};
+  LIVE_LIMIT = live.seconds || 60;
 
   el("model").innerHTML = `
     <div class="model-name">${esc(d.model || d.provider)}</div>
@@ -328,7 +400,22 @@ async function loadModel() {
         <div class="v">${(d.voices || []).length || "-"}</div></div>
       <div class="fact"><div class="k">Clip length</div>
         <div class="v">${esc(d.grab_seconds)}s</div></div>
+      <div class="fact"><div class="k">Live</div>
+        <div class="v" style="color:${live.available ? "var(--good)" : "var(--dim)"}">
+          ${live.available ? esc(lc.transport || "yes") : "no"}</div></div>
     </div>
+    ${live.available ? `
+      <div class="steps">
+        <div class="step">
+          <div class="n">Live, as it happens</div>
+          <code>${esc(lc.endpoint || "")}</code>
+          <p>Audio goes up as it arrives and translated speech comes back on
+             the same socket, ${esc(lc.wire ? lc.wire.rate : "")} Hz mono.
+             ${(lc.modes || []).map((m) => esc(m.name) + ": " + esc(m.detail)).join(" ")}</p>
+        </div>
+      </div>
+      ${(lc.caveats || []).map((c) => `<p class="warn-box">${esc(c)}</p>`).join("")}
+    ` : (live.why ? `<p class="note">${esc(live.why)}</p>` : "")}
     ${health.ok ? "" : `<p class="status err">${esc(health.error || "cannot reach the model")}</p>`}
     <div class="steps">${steps}</div>
     ${absent ? `<div class="steps">${absent}</div>` : ""}
@@ -344,6 +431,7 @@ async function loadModel() {
     : [`<option value="${esc(d.target_language)}">${esc(d.target_language)}</option>`]
   ).join("");
   el("seconds").value = d.grab_seconds;
+  el("live-seconds").value = LIVE_LIMIT;
 }
 
 /* -- 2. credit ------------------------------------------------------- */
@@ -421,6 +509,176 @@ async function runOnce() {
   }
 }
 
+/* -- 3b. the live session -------------------------------------------- */
+/* One timer, started when a session starts and cleared when it ends. A page
+   left open on a finished session should not keep asking. */
+let LIVE_LIMIT = 60;
+let liveId = "";
+let liveTimer = null;
+let liveAudioFor = "";
+
+const PHASE_CLASS = {
+  resolving: "waiting", connecting: "waiting", starting: "waiting",
+  listening: "going", finishing: "ended", done: "ended", failed: "broke",
+};
+const PHASE_WORDS = {
+  resolving: "finding the stream",
+  connecting: "opening the session",
+  starting: "the model is starting up",
+  listening: "translating",
+  finishing: "finishing the last sentence",
+  done: "finished",
+  failed: "failed",
+};
+
+async function startLive() {
+  const status = el("live-status");
+  el("go-live").disabled = true;
+  status.className = "status";
+  status.textContent = "Opening a session\u2026";
+  el("live-warn").innerHTML = "";
+  try {
+    const r = await fetch(`/api/translate/${MODE}/live`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        channel: el("channel").value,
+        target: el("target").value,
+        seconds: Number(el("live-seconds").value) || LIVE_LIMIT,
+      }),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.detail || r.statusText);
+    liveId = body.id;
+    liveAudioFor = "";
+    el("stop-live").hidden = false;
+    paintLive(body);
+    if (liveTimer) clearInterval(liveTimer);
+    liveTimer = setInterval(pollLive, 1500);
+  } catch (e) {
+    status.className = "status err";
+    status.textContent = String(e.message || e);
+    el("go-live").disabled = false;
+  }
+}
+
+async function stopLive() {
+  if (!liveId) return;
+  el("stop-live").disabled = true;
+  try {
+    const r = await fetch(
+      `/api/translate/${MODE}/live/${encodeURIComponent(liveId)}/stop`,
+      { method: "POST" });
+    if (r.ok) paintLive(await r.json());
+  } catch (e) {
+    /* the next poll shows whatever actually happened */
+  } finally {
+    el("stop-live").disabled = false;
+  }
+}
+
+async function pollLive() {
+  try {
+    const d = await get(`/api/translate/${MODE}/live?id=${encodeURIComponent(liveId)}`);
+    if (d.live) paintLive(d.live);
+    else endLive();
+  } catch (e) {
+    el("live-status").className = "status err";
+    el("live-status").textContent =
+      "Lost contact with the server: " + (e.message || e);
+    endLive();
+  }
+}
+
+function endLive() {
+  if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+  el("go-live").disabled = false;
+  el("stop-live").hidden = true;
+  loadCredits().catch(() => {});
+  loadHistory().catch(() => {});
+}
+
+function paintLive(s) {
+  const cls = PHASE_CLASS[s.phase] || "waiting";
+  const word = PHASE_WORDS[s.phase] || s.phase;
+  const st = el("live-status");
+  st.className = "status";
+  st.innerHTML =
+    `<span class="phase ${cls}${s.running && cls === "waiting" ? " pulse" : ""}">` +
+    `${esc(word)}</span> ` +
+    `<span class="sub">${esc(s.channel)} &middot; ${esc(s.elapsed_s)}s of ` +
+    `${esc(s.limit_s)}s` +
+    `${s.sent_seconds ? ` &middot; ${esc(s.sent_seconds)}s sent` : ""}` +
+    `${s.spoken_seconds ? ` &middot; ${esc(s.spoken_seconds)}s back` : ""}</span>`;
+  if (s.error) {
+    st.innerHTML += `<br><span style="color:var(--bad)">${esc(s.error)}</span>`;
+  }
+  el("live-warn").innerHTML = s.language_warning
+    ? `<p class="warn-box">${esc(s.language_warning)}</p>` : "";
+  showLive(s);
+  if (!s.running) endLive();
+}
+
+/* The audio elements are built once per session rather than on every poll:
+   reassigning src would restart playback from the beginning every second and
+   a half, which makes a live translation impossible to actually listen to. */
+function showLive(s) {
+  const base = `/api/translate/${MODE}/live/${encodeURIComponent(s.id)}/audio`;
+  if (liveAudioFor !== s.id) {
+    liveAudioFor = s.id;
+    el("listen").innerHTML = `
+      <div class="pair">
+        <div class="side">
+          <h4>What went in<span class="lang">${esc(s.source_language)}</span></h4>
+          <audio controls preload="none" src="${base}/heard"></audio>
+          <p class="note">The commentary as we received it.</p>
+        </div>
+        <div class="side">
+          <h4>What came back<span class="lang">${esc(s.target_language)}</span></h4>
+          <audio controls preload="none" src="${base}/spoken"></audio>
+          <p class="note">Reload the player to pick up what has arrived since.</p>
+        </div>
+      </div>
+      <div class="chips" id="live-chips"></div>
+      <div class="caps" id="live-caps"></div>
+      <div id="live-notes"></div>`;
+  }
+  const chips = el("live-chips");
+  if (chips) {
+    chips.innerHTML = [
+      `<span class="chip"><b>${esc(s.channel)}</b></span>`,
+      `<span class="chip">${esc(s.live_mode)} mode</span>`,
+      s.ready_s ? `<span class="chip">ready in <b>${esc(s.ready_s)}s</b></span>` : "",
+      s.first_audio_s
+        ? `<span class="chip">first words after <b>${esc(s.first_audio_s)}s</b></span>`
+        : "",
+      s.sent_seconds ? `<span class="chip">sent <b>${esc(s.sent_seconds)}s</b></span>` : "",
+      s.spoken_seconds
+        ? `<span class="chip">spoke <b>${esc(s.spoken_seconds)}s</b></span>` : "",
+    ].filter(Boolean).join("");
+  }
+  const caps = el("live-caps");
+  if (caps) {
+    const rows = (s.captions || []).slice().reverse();
+    caps.innerHTML = rows.length
+      ? rows.map((c) => `
+          <div class="cap">
+            <div class="t">${esc(c.at)}s</div>
+            <div class="h">${esc(c.heard || "\u2014")}</div>
+            <div class="s">${esc(c.said || "\u2014")}</div>
+          </div>`).join("")
+      : `<p class="sub" style="margin:8px 0 0">${
+          s.running ? "Waiting for the first sentence\u2026"
+                    : "Nothing was recognised in this audio."}</p>`;
+  }
+  const notes = el("live-notes");
+  if (notes) {
+    const lines = (s.notes || []).filter(Boolean);
+    notes.innerHTML = lines.length
+      ? `<p class="note">${lines.map(esc).join("<br>")}</p>` : "";
+  }
+}
+
 /* -- 4. listen ------------------------------------------------------- */
 function show(run) {
   const base = `/api/translate/${MODE}/audio/${encodeURIComponent(run.id)}`;
@@ -483,14 +741,42 @@ async function loadHistory() {
 }
 
 /* -- start ----------------------------------------------------------- */
+function tab(which) {
+  const live = which === "live";
+  el("tab-live").classList.toggle("on", live);
+  el("tab-clip").classList.toggle("on", !live);
+  el("pane-live").hidden = !live;
+  el("pane-clip").hidden = live;
+}
+el("tab-live").onclick = () => tab("live");
+el("tab-clip").onclick = () => tab("clip");
+el("go-live").onclick = startLive;
+el("stop-live").onclick = stopLive;
 el("go").onclick = runOnce;
+
+/* A session already running when the page opens -- after a reload, or in a
+   second tab -- is adopted rather than ignored. Without this, the obvious
+   next move is to press Start and be told the one slot is already taken. */
+async function adoptRunningSession() {
+  try {
+    const d = await get(`/api/translate/${MODE}/live`);
+    if (d.live && d.live.running) {
+      liveId = d.live.id;
+      el("stop-live").hidden = false;
+      el("go-live").disabled = true;
+      paintLive(d.live);
+      liveTimer = setInterval(pollLive, 1500);
+    }
+  } catch (e) { /* the page is still usable without it */ }
+}
 (async () => {
   try {
     await loadModes();
     await Promise.all([loadModel(), loadCredits(), loadChannels(), loadHistory()]);
+    await adoptRunningSession();
   } catch (e) {
-    el("status").className = "status err";
-    el("status").textContent = "Cannot reach the server: " + (e.message || e);
+    el("live-status").className = "status err";
+    el("live-status").textContent = "Cannot reach the server: " + (e.message || e);
   }
 })();
 </script>

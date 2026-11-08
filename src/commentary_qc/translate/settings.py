@@ -122,6 +122,24 @@ class TranslateSettings:
     #: off air never starts at all, and the page needs to be told so.
     grab_timeout_s: float = 25.0
 
+    # -- the live path ---------------------------------------------------
+    #: ``fast`` or ``slow``. Fast takes audio almost at once and carries the
+    #: fourteen languages Camb publishes for realtime. Slow carries more but
+    #: documents a cold boot of thirty seconds or more, which is a long time
+    #: to hold a page on "starting" - so it is opt-in, and the only option
+    #: for a language fast refuses.
+    live_mode: str = "fast"
+    #: Hard ceiling on one live session, in seconds. Not a guess at what is
+    #: useful: it is what stops a session somebody opened and walked away
+    #: from running for the four hours the protocol allows. A realtime
+    #: session is billed by the clock rather than per call, so wall time is
+    #: the thing that has to be bounded.
+    live_seconds: float = 60.0
+    #: How many live sessions at once. One, because Camb's free plan
+    #: documents an API concurrency of 1 and a second session is refused by
+    #: the far end only after audio has started flowing.
+    live_concurrent: int = 1
+
     # -- plumbing -------------------------------------------------------
     #: Segments waiting to be sent. Small on purpose: if the provider is
     #: slower than the match, the right answer is to drop old audio, not to
@@ -197,6 +215,12 @@ class TranslateSettings:
             raise ValueError("budgets cannot be negative")
         if self.camb_transcription_mode not in ("fast", "slow"):
             raise ValueError("camb_transcription_mode must be 'fast' or 'slow'")
+        if self.live_mode not in ("fast", "slow"):
+            raise ValueError("live_mode must be 'fast' or 'slow'")
+        if self.live_seconds <= 0:
+            raise ValueError("live_seconds must be positive")
+        if self.live_concurrent < 1:
+            raise ValueError("live_concurrent must be at least 1")
         # Tuples, so a settings object shared between threads cannot be
         # mutated underneath one of them.
         self.enabled_providers = tuple(self.enabled_providers)
@@ -267,6 +291,12 @@ class TranslateSettings:
             data["shadow_daily_minutes"] = float(env["QC_SHADOW_DAILY_MINUTES"])
         if env.get("QC_SHADOW_SECONDS"):
             data["grab_seconds"] = float(env["QC_SHADOW_SECONDS"])
+        if env.get("QC_LIVE_MODE"):
+            data["live_mode"] = env["QC_LIVE_MODE"].strip().lower()
+        if env.get("QC_LIVE_SECONDS"):
+            data["live_seconds"] = float(env["QC_LIVE_SECONDS"])
+        if env.get("QC_LIVE_CONCURRENT"):
+            data["live_concurrent"] = int(env["QC_LIVE_CONCURRENT"])
         # The voice and the synthesis model are environment settings so they
         # can be changed on a deployment without editing code -- which is the
         # whole point of the adapter being swappable.

@@ -82,6 +82,39 @@ def to_wav(
     return buf.getvalue()
 
 
+def pcm16_bytes(samples: np.ndarray) -> bytes:
+    """Float32 in, little-endian PCM16 out, at whatever rate it arrived.
+
+    The realtime wire format. No resampling: a caller that needs 24 kHz asks
+    ffmpeg for 24 kHz, which is a better answer than upsampling a decode that
+    has already thrown the top octave away.
+    """
+    audio = np.asarray(samples, dtype=np.float32).ravel()
+    pcm = np.clip(audio, -1.0, 1.0)
+    # Same 32767 as to_wav, and for the same reason.
+    return np.round(pcm * 32767.0).astype("<i2").tobytes()
+
+
+def wav_from_pcm16(pcm: bytes, rate: int) -> bytes:
+    """Put a WAV header on bytes that are already PCM16 mono.
+
+    The realtime endpoint returns raw headerless PCM, and a browser cannot
+    play that: an ``<audio>`` element needs to be told the rate and the width.
+    Hence a header rather than handing the stream straight to the page.
+    """
+    # An odd byte would be half a sample, which plays as a click and shifts
+    # everything after it by one byte. Dropping it is the lesser evil.
+    if len(pcm) % 2:
+        pcm = pcm[:-1]
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as fh:
+        fh.setnchannels(1)
+        fh.setsampwidth(2)
+        fh.setframerate(int(rate))
+        fh.writeframes(pcm)
+    return buf.getvalue()
+
+
 def wav_seconds(blob: bytes) -> float:
     """How long a WAV blob is. Used to check what we are about to be charged for."""
     with wave.open(io.BytesIO(blob), "rb") as fh:

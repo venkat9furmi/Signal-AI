@@ -32,10 +32,6 @@ from .config import ANALYSIS_RATE, SourceConfig
 
 log = logging.getLogger(__name__)
 
-#: Read granularity off the ffmpeg pipe. 100 ms keeps alert latency low
-#: without one syscall per frame.
-_READ_SAMPLES = ANALYSIS_RATE // 10
-
 
 @dataclass(slots=True)
 class Block:
@@ -53,9 +49,20 @@ class FFmpegSource:
     #: URL schemes that denote a continuous feed rather than finite media.
     LIVE_SCHEMES = ("http://", "https://", "rtmp://", "rtmps://", "rtsp://", "srt://", "udp://")
 
-    def __init__(self, url: str, cfg: SourceConfig, ffmpeg_bin: str = "ffmpeg") -> None:
+    def __init__(
+        self,
+        url: str,
+        cfg: SourceConfig,
+        ffmpeg_bin: str = "ffmpeg",
+        rate: int | None = None,
+    ) -> None:
         self.url = url
         self.cfg = cfg
+        # The analysis rate unless a caller needs another. Live translation
+        # does: the realtime endpoint works at 24 kHz, and letting ffmpeg
+        # resample from the source is better than upsampling a 16 kHz decode
+        # that has already thrown the top octave away.
+        self.rate = int(rate or ANALYSIS_RATE)
         self.ffmpeg_bin = shutil.which(ffmpeg_bin) or ffmpeg_bin
         self.reconnects = 0
         # A live feed reconnects forever; a local file is finite and EOF means
@@ -91,7 +98,7 @@ class FFmpegSource:
             "-vn",
             "-map", "0:a:0",
             "-ac", "1",
-            "-ar", str(ANALYSIS_RATE),
+            "-ar", str(self.rate),
             "-f", "f32le",
             "-acodec", "pcm_f32le",
             "-",
@@ -151,7 +158,7 @@ class FFmpegSource:
 
         q: queue.Queue = queue.Queue(maxsize=64)
         errors: list[str] = []
-        nbytes = _READ_SAMPLES * 4  # float32
+        nbytes = max(1, self.rate // 10) * 4  # float32, 100 ms
 
         def reader() -> None:
             try:

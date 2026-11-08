@@ -11,6 +11,11 @@ uvicorn>=0.27
 pydantic>=2.6
 python-multipart>=0.0.9   # the sign-in form posts urlencoded data
 
+# Live translation
+websockets>=13         # sync client (websockets.sync) for Camb realtime;
+                       # already present via uvicorn on dev machines, but
+                       # the image installs only what is listed here.
+
 # Also required, outside pip: ffmpeg (in the Docker image it is installed by
 # the Dockerfile; on Windows set FFMPEG_BIN to its path).
 #

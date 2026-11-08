@@ -296,6 +296,15 @@ def create_app(
         "balance_low": th.crowd_dominating_db, "balance_high": th.voice_dominates_db,
     }
 
+    translate_router = translate_api.build_router(
+        translate_settings,
+        translate_modes,
+        translate_runs,
+        registry=registry,
+        source=settings.source,
+        ffmpeg_bin=settings.ffmpeg_bin,
+    )
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         yield
@@ -303,19 +312,18 @@ def create_app(
         feed.stop()
         store.close()
         claims.close()
+        # Live translation sessions first: each one holds an ffmpeg pull and a
+        # metered socket, and a session the process forgot about would keep
+        # both open -- and keep being billed -- until the container died.
+        stopped = getattr(translate_router, "live_runs", None)
+        if stopped is not None:
+            count = stopped.stop_all("the server is shutting down")
+            if count:
+                log.info("stopped %d live translation session(s)", count)
         translate_runs.close()
 
     app = FastAPI(title="Commentary QC", lifespan=lifespan)
-    app.include_router(
-        translate_api.build_router(
-            translate_settings,
-            translate_modes,
-            translate_runs,
-            registry=registry,
-            source=settings.source,
-            ffmpeg_bin=settings.ffmpeg_bin,
-        )
-    )
+    app.include_router(translate_router)
     page = Path(__file__).parent / "static" / "claim.html"
     translate_page = Path(__file__).parent / "static" / "translate.html"
 

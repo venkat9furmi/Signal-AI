@@ -40,7 +40,9 @@ from ..models import (
     Transcript,
     Translation,
 )
+from ..mappers import realtime as rt
 from ..settings import TranslateSettings
+from .camb_realtime import CambLiveSession
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +62,10 @@ class CambProvider:
         self._opener = opener or urllib.request.build_opener()
         self.languages_map = LanguageMap()
         self._languages_at = 0.0
+        # Injected by the tests so the realtime path can run against a local
+        # WebSocket server. None means the real library.
+        self._connect: Any | None = None
+        self._live_url = rt.REALTIME_URL
 
     # -- plumbing -------------------------------------------------------
     def _headers(self) -> dict[str, str]:
@@ -267,6 +273,94 @@ class CambProvider:
     def voices(self) -> tuple[dict, ...]:
         """The voices this key may use."""
         return t.voices(self._call("GET", "/list-voices"))
+
+    # -- live ------------------------------------------------------------
+    def open_live(
+        self,
+        source: str,
+        target: str,
+        *,
+        mode: str = rt.FAST,
+        voice_id: int | None = None,
+    ) -> CambLiveSession:
+        """Open a realtime session on ``wss://realtime.camb.ai/v1/realtime``.
+
+        A wholly different protocol from the rest of this adapter, and a
+        different host, so none of the REST plumbing above is reused and
+        pointing ``camb_base_url`` at a fake does not redirect it. The tests
+        set ``_live_url`` and ``_connect`` instead.
+        """
+        if not self._key:
+            raise NotConfigured(
+                "CAMB_API_KEY is not set, so no live session can open."
+            )
+        return CambLiveSession(
+            self._key,
+            source,
+            target,
+            mode=mode,
+            voice_id=voice_id,
+            url=self._live_url,
+            connect=self._connect,
+        )
+
+    def live_languages(self) -> tuple[str, ...]:
+        """The realtime list, which is *not* the file-translation list.
+
+        Returned from the documented constant rather than fetched: Camb
+        publishes no discovery endpoint for realtime, and the source and
+        target language endpoints belong to the REST path, which carries far
+        more languages. Showing those beside a live control is how somebody
+        picks a language that is only refused once a match has started.
+        """
+        return rt.REALTIME_LANGUAGES
+
+    def live_capabilities(self) -> dict:
+        """What the live path does, for the page.
+
+        Stated separately from :meth:`capabilities` because it is a different
+        product with different languages and its own billing window, and a
+        page that showed the file-translation steps beside a live button would
+        be describing the wrong thing.
+        """
+        return {
+            "provider": self.name,
+            "model": "camb/realtime-speech-to-speech",
+            "transport": "WebSocket",
+            "endpoint": rt.REALTIME_URL,
+            "modes": [
+                {
+                    "name": rt.FAST,
+                    "detail": "Accepts audio almost immediately. The fourteen "
+                              "languages Camb publishes for realtime.",
+                },
+                {
+                    "name": rt.SLOW,
+                    "detail": "More languages, but the docs document a cold "
+                              "boot of 30 seconds or more before the session "
+                              "takes audio.",
+                },
+            ],
+            "wire": {
+                "rate": rt.WIRE_RATE,
+                "format": "PCM16 mono, base64 inside JSON going out, "
+                          "raw frames coming back",
+            },
+            "languages": list(rt.REALTIME_LANGUAGES),
+            "limits": {
+                "max_session_s": rt.MAX_SESSION_S,
+                "idle_s": rt.IDLE_LIMIT_S,
+                "setup_s": rt.SETUP_DEADLINE_S,
+            },
+            "caveats": [
+                "The docs print one list of 14 realtime languages and say "
+                "slow mode carries more, without printing either per-mode "
+                "list. Italian and Greek are absent from the published list.",
+                "Camb documents no rate per minute for realtime and no "
+                "balance endpoint. Sessions are billed in windows and "
+                "finalised on close.",
+            ],
+        }
 
     # -- housekeeping ----------------------------------------------------
     def capabilities(self) -> dict:

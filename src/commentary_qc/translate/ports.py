@@ -12,8 +12,9 @@ to use one adapter for each.
 
 from __future__ import annotations
 
-from typing import Protocol, Sequence, runtime_checkable
+from typing import Iterator, Protocol, Sequence, runtime_checkable
 
+from .mappers.realtime import LiveEvent
 from .models import AudioSegment, SpokenAudio, Transcript, Translation
 
 
@@ -114,5 +115,93 @@ class AudioTranslator(Provider, Speaker, Protocol):
         provider -- one vendor dubs in a single call, another needs
         recognise, translate and speak chained -- and a page that hardcoded
         either would start lying the day the provider was swapped.
+        """
+        ...
+
+
+@runtime_checkable
+class LiveSession(Protocol):
+    """One open realtime conversation: audio in, translated audio out.
+
+    A session is stateful and short-lived, so it is its own object rather than
+    a method on the provider. The split between :meth:`send` and
+    :meth:`drain` is what makes it usable from one thread: reading a socket
+    blocks, and a loop that blocked on the far end would stop feeding it,
+    which the server answers with ``client_too_slow``. An adapter is expected
+    to read on a thread of its own and have :meth:`drain` hand over whatever
+    has arrived.
+    """
+
+    rate: int
+    """Sample rate the session expects and emits, in Hz."""
+
+    def send(self, pcm: bytes) -> None:
+        """Hand over the next chunk of mono PCM16 at :attr:`rate`."""
+        ...
+
+    def drain(self) -> Iterator[LiveEvent]:
+        """Yield everything that has arrived since the last call, then stop.
+
+        Never blocks waiting for more. An empty iterator means the far end has
+        said nothing yet, which during a slow-mode cold boot is the normal
+        state for half a minute.
+        """
+        ...
+
+    def wait_ready(self, timeout_s: float) -> None:
+        """Block until the session will accept audio, or raise.
+
+        Worth its own method because the two modes differ by two orders of
+        magnitude here -- fast is nearly immediate, slow documents "30s or
+        more" -- and audio sent before the far end is ready is simply lost.
+        """
+        ...
+
+    @property
+    def closed(self) -> bool:
+        """True once the far end has gone, whether cleanly or not."""
+        ...
+
+    def close(self) -> None:
+        """Finish. Safe to call twice, and safe to call on a dead session."""
+        ...
+
+
+@runtime_checkable
+class LiveTranslator(Protocol):
+    """A provider that can translate a stream rather than a file.
+
+    Kept apart from :class:`AudioTranslator` because the two are separately
+    available and separately priced: the same vendor reaches file translation
+    through three REST calls and live translation through a socket, with
+    different languages on each. A provider offering one says nothing about
+    whether it offers the other, so the mode asks for the capability it needs
+    and gets a clear refusal rather than a wrong-shaped object.
+    """
+
+    name: str
+
+    def open_live(
+        self,
+        source: str,
+        target: str,
+        *,
+        mode: str = "fast",
+        voice_id: int | None = None,
+    ) -> LiveSession:
+        """Open a session, or raise :class:`~.models.NotConfigured`.
+
+        Does not wait for readiness -- that is :meth:`LiveSession.wait_ready`,
+        so a caller can start pulling audio while a slow session boots.
+        """
+        ...
+
+    def live_languages(self) -> tuple[str, ...]:
+        """Tags this provider will accept on a live session.
+
+        Separate from :meth:`Provider.languages` on purpose: the live and
+        file paths do not carry the same set, and showing the file list beside
+        a live control is how somebody ends up picking a language that is
+        refused only once a match has started.
         """
         ...

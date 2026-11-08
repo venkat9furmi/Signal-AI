@@ -24,6 +24,8 @@ import numpy as np
 from .. import providers as provider_registry
 from ..audio import to_wav
 from ..budget import Budget
+from ...config import SourceConfig
+from ..live import LiveRun
 from ..mappers.languages import primary
 from ..models import (
     AudioSegment,
@@ -68,6 +70,7 @@ class ShadowMode:
         built=True,
         publishes=False,
         retains_audio=True,
+        live=True,
     )
 
     def __init__(self, settings: TranslateSettings) -> None:
@@ -90,6 +93,45 @@ class ShadowMode:
             publishes=self.info.publishes,
             retains_audio=self.info.retains_audio,
             overrides=dict(self.OVERRIDES),
+        )
+
+    # -- a live session ---------------------------------------------------
+    def live(
+        self,
+        wiring: Wiring,
+        channel: str,
+        *,
+        source: SourceConfig,
+        ffmpeg_bin: str = "ffmpeg",
+        source_language: str = "auto",
+        target_language: str = "",
+        live_mode: str = "",
+        seconds: float = 0.0,
+        url: str = "",
+    ) -> LiveRun:
+        """Build a live run on this wiring. Does not start it.
+
+        The other half of shadow mode, and the half that answers the question
+        that matters: the clip path shows whether the model understands
+        football commentary, and this shows whether it can keep up with a
+        match. Same budget, same provider, same audience of one -- what
+        changes is that the audio is streamed while it happens rather than
+        recorded and posted.
+
+        Returned unstarted so the caller owns when it begins, which is what
+        lets the runner refuse a second session before anything is spent.
+        """
+        settings = wiring.settings
+        return LiveRun(
+            channel,
+            wiring,
+            source_language=source_language or "auto",
+            target_language=target_language or settings.target_language,
+            live_mode=(live_mode or settings.live_mode),
+            source=source,
+            ffmpeg_bin=ffmpeg_bin,
+            max_seconds=seconds or settings.live_seconds,
+            url=url,
         )
 
     # -- one run ---------------------------------------------------------

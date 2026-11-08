@@ -94,7 +94,19 @@ by definition — and Slack only ever speaks about claimed channels.
 ## Translation
 
 Open <http://127.0.0.1:8642/translate>. Pick a channel that is on air, press
-Translate, and listen to what the model produced next to what it heard.
+Start, and listen to the translation arriving while the commentary is still
+being spoken.
+
+Two paths, and the difference is the point:
+
+| | What it does | What it answers |
+|---|---|---|
+| **Live** | Streams the channel to a realtime session and plays the translated speech back as it arrives | can this keep up with a match |
+| **Recorded clip** | Records a few seconds, then transcribes, translates and speaks it in three separate calls | does this model understand football commentary |
+
+They are different products with different languages and different billing, so
+the page keeps them apart rather than presenting one as a slower version of the
+other.
 
 ### Modes are execution wirings, not a volume knob
 
@@ -104,8 +116,12 @@ calling one *is* choosing the wiring rather than passing a flag something
 downstream might ignore:
 
 ```
-POST /api/translate/shadow/run       -> runs
-POST /api/translate/standard/run     -> 501, with what building it needs
+POST /api/translate/shadow/live      -> opens a realtime session
+GET  /api/translate/shadow/live      -> captions and progress, polled
+POST /api/translate/shadow/live/<id>/stop
+GET  /api/translate/shadow/live/<id>/audio/spoken   -> playable while running
+POST /api/translate/shadow/run       -> the recorded-clip path
+POST /api/translate/standard/live    -> 501, with what building it needs
 ```
 
 | Mode | Built | What it is for | Who sees the output |
@@ -118,7 +134,46 @@ exactly what building it means. It refuses rather than falling back to shadow,
 because asking for production and silently getting the test wiring is the one
 failure nobody would notice from outside.
 
-### What the audio translation actually is
+### Live translation
+
+`wss://realtime.camb.ai/v1/realtime`. A different protocol and a different host
+from the REST adapter, so none of that plumbing is shared.
+
+* The key goes in the `x-api-key` **request header**. The docs also allow it in
+  the opening message; we never send it there, because it would land in any
+  transcript of the session.
+* Audio **up** is base64 inside JSON. The server ignores binary frames from the
+  client, so this is not negotiable, and it costs a third in bandwidth.
+* Audio **down** arrives as either a raw binary frame or a base64 field in
+  JSON. The vendor's own documents disagree about which, so we accept both:
+  guessing wrong gives a session that connects, reports progress and produces
+  no audio.
+* 24 kHz mono PCM16 both ways, which is why the live tap asks ffmpeg for 24 kHz
+  rather than reusing the 48 kHz analysis pull.
+
+One session at a time by default. Camb documents an API concurrency of 1, and a
+second session is otherwise refused by the far end only after audio has already
+started flowing &mdash; so it is refused here first, naming the channel that
+holds the slot.
+
+The budget is checked **against the clock**, every few seconds, because a
+realtime session is billed in windows rather than per call: there is no request
+boundary to check at. `QC_LIVE_SECONDS` is a hard ceiling so a session somebody
+opened and walked away from cannot run the four hours the protocol allows.
+
+#### Italian and Greek are not on the list
+
+Camb's reference prints fourteen realtime languages. `it-it` and `el-gr` are
+not among them &mdash; MMC's Italian (9 channels) and Greek (11) &mdash; while
+English, French, German and Portuguese (via `pt-br`) are. That is 32 of the 52
+channels covered and 20 not.
+
+The docs say slow mode carries more languages than fast but **never print
+either per-mode list**, so this may simply be incomplete. The page therefore
+**warns and still lets you try**: refusing on the strength of documentation we
+know is partial would be guessing, and one real session settles it.
+
+### What the recorded-clip path is
 
 Three chained calls, not one:
 
@@ -173,12 +228,15 @@ demand. Same adapters, same budget shape, its own mode setting.
 src/commentary_qc/translate/
   models.py      segments, transcripts, captions, runs, failures - no vendor words
   settings.py    every knob, validated at startup
-  ports.py       the capabilities a provider must offer, including speech
+  ports.py       the capabilities a provider must offer: hear, translate,
+                 speak, and stream live
   modes/         execution wirings: shadow (built), standard (declared)
   mappers/       vendor JSON <-> our types: pure, no HTTP, unit-tested
+                 (realtime.py holds the whole WebSocket protocol, no socket)
   providers/     one adapter per model, chosen from a registry
   grab.py        a few seconds of a live channel, on demand
-  audio.py       48 kHz float32 -> the 16 kHz mono WAV a provider accepts
+  live.py        one realtime session: ffmpeg in, translated speech out
+  audio.py       48 kHz float32 -> the WAV a provider accepts, and PCM16 out
   runs.py        shadow runs and their audio, so it can be played back
   budget.py      the guard on the credits
   segmenter.py   cuts at pauses, reusing the QC engine's own VAD
@@ -212,6 +270,7 @@ python tests/test_engine.py         # rules, hysteresis, escalation, clip veto
 python tests/test_slack_delivery.py # Slack delivery against a fake Slack
 python tests/test_no_commentary.py  # filler detection vs labelled recordings
 python tests/test_translate.py      # translation: mappers, modes, budget, runs, pipeline
+python tests/test_live_translate.py # live: the realtime protocol, against a fake Camb WebSocket
 python tools/replay_alerts.py <db>  # replay a night through today's rules
 ```
 

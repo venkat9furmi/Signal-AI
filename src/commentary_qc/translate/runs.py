@@ -35,6 +35,7 @@ SCHEMA = (
         id              TEXT PRIMARY KEY,
         created         REAL NOT NULL,
         mode            TEXT NOT NULL,
+        kind            TEXT,
         channel         TEXT,
         seconds         REAL,
         provider        TEXT,
@@ -62,7 +63,7 @@ SCHEMA = (
 )
 
 _COLUMNS = (
-    "id", "created", "mode", "channel", "seconds", "provider", "model", "voice",
+    "id", "created", "mode", "kind", "channel", "seconds", "provider", "model", "voice",
     "source_language", "source_text", "target_language", "target_text",
     "status", "error", "transcribe_s", "translate_s", "speak_s", "total_s",
     "credits", "source_url", "heard_audio", "spoken_audio", "heard_type",
@@ -80,6 +81,11 @@ class RunStore:
     KEEP_AUDIO = 25
     #: And how many rows are kept at all.
     KEEP_ROWS = 400
+    #: A ceiling on the audio held in total. The row count alone was enough
+    #: when every run was a 15 second clip; a live run is minutes of audio on
+    #: both sides, so 25 of those would be hundreds of megabytes in a file
+    #: that is meant to stay small. Whichever limit bites first wins.
+    KEEP_AUDIO_BYTES = 192 * 1024 * 1024
 
     def __init__(self, path: str) -> None:
         self.path = path
@@ -94,6 +100,28 @@ class RunStore:
             self._conn.execute("PRAGMA synchronous=NORMAL")
             for statement in SCHEMA:
                 self._conn.execute(statement)
+            self._conn.commit()
+        self._add_missing_columns()
+
+    def _add_missing_columns(self) -> None:
+        """Bring an older file up to the current column set.
+
+        ``CREATE TABLE IF NOT EXISTS`` does nothing to a table that already
+        exists, so a column added after a database was first written would be
+        missing and every insert would fail. Additive only -- nothing here
+        drops or rewrites anything.
+        """
+        with self._lock:
+            have = {
+                row["name"]
+                for row in self._conn.execute("PRAGMA table_info(translate_runs)")
+            }
+            for name, decl in (("kind", "TEXT"),):
+                if name not in have:
+                    log.info("adding column %s to translate_runs", name)
+                    self._conn.execute(
+                        f"ALTER TABLE translate_runs ADD COLUMN {name} {decl}"
+                    )
             self._conn.commit()
 
     # -- writing ---------------------------------------------------------
@@ -121,6 +149,26 @@ class RunStore:
                 (self.KEEP_AUDIO,),
             )
             stripped = cur.rowcount or 0
+            keep: list[str] = []
+            total = 0
+            for row in self._conn.execute(
+                "SELECT id,"
+                " COALESCE(LENGTH(heard_audio), 0) + COALESCE(LENGTH(spoken_audio), 0)"
+                " AS bytes FROM translate_runs"
+                " WHERE heard_audio IS NOT NULL OR spoken_audio IS NOT NULL"
+                " ORDER BY created DESC"
+            ):
+                total += int(row["bytes"] or 0)
+                if total > self.KEEP_AUDIO_BYTES:
+                    break
+                keep.append(row["id"])
+            cur = self._conn.execute(
+                "UPDATE translate_runs SET heard_audio = NULL, spoken_audio = NULL"
+                " WHERE (heard_audio IS NOT NULL OR spoken_audio IS NOT NULL)"
+                f" AND id NOT IN ({', '.join('?' for _ in keep) or 'NULL'})",
+                keep,
+            )
+            stripped += cur.rowcount or 0
             cur = self._conn.execute(
                 "DELETE FROM translate_runs WHERE id NOT IN ("
                 "  SELECT id FROM translate_runs ORDER BY created DESC LIMIT ?"
@@ -139,7 +187,7 @@ class RunStore:
             "SELECT id, created, mode, channel, seconds, provider, model, voice,"
             " source_language, source_text, target_language, target_text, status,"
             " error, transcribe_s, translate_s, speak_s, total_s, credits,"
-            " source_url, heard_type, spoken_type,"
+            " source_url, heard_type, spoken_type, kind,"
             " heard_audio IS NOT NULL AS has_heard,"
             " spoken_audio IS NOT NULL AS has_spoken"
             " FROM translate_runs WHERE 1=1"
