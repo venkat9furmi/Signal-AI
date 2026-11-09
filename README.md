@@ -213,6 +213,7 @@ being something that used to be true.
 
 ```
 python tests/test_architecture.py   # the dependency rule, enforced
+python tests/test_security.py       # keys, channel names, header filenames
 python tests/test_engine.py         # the rules and their hysteresis
 python tests/test_dsp.py            # loudness, true peak, VAD
 python tests/test_translate.py      # mappers, modes, budget, the clip path
@@ -228,6 +229,31 @@ the retries, the refusals, running out of credit. None of it needs a key and
 none of it spends anything.
 
 ---
+
+## Security
+
+Keys come from the environment only. The page cannot write one, no API
+response carries one, and `.translate.env` and `.slack.env` are ignored by
+both git and Docker. `tests/test_security.py` checks all of that, plus two
+things a review on 9 November turned up:
+
+- **The Gemini key travels in a URL**, because that socket documents no header
+  form — and the WebSocket library echoes the URI inside its own error
+  messages. A `GEMINI_LIVE_URL` mistyped as `http://` produced an error
+  containing the whole key, which would have been stored in a run's error
+  column and shown on the page. Every exception is redacted now.
+- **A channel name reaches a URL builder and then ffmpeg.** `../../x`,
+  `x
+y` and a 300-character name were all accepted and started a run.
+  A channel is now validated where it becomes a URL, so every caller is
+  covered rather than just the endpoint that remembered to check.
+
+Two things are still yours to do:
+
+- **Rotate the Slack bot token, the `xapp-` token and the MOD password.** All
+  three were pasted into a chat. No code change substitutes for that.
+- **Set `QC_PASSCODE` before the page leaves localhost.** Claiming a channel
+  starts and stops monitoring, so an open page is a control surface.
 
 ## Operating notes
 

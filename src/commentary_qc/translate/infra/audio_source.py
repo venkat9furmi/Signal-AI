@@ -21,6 +21,7 @@ from typing import Iterator
 from commentary_qc.audio_source import FFmpegSource
 from commentary_qc.config import SourceConfig
 from commentary_qc.discovery import resolve
+from commentary_qc.translate.core.channels import clean_channel
 from commentary_qc.translate.core.models import AudioBlock, AudioSpec
 
 log = logging.getLogger(__name__)
@@ -66,7 +67,13 @@ class FFmpegAudioSource:
         self.ffmpeg_bin = ffmpeg_bin
 
     def config_for(self, channel: str) -> SourceConfig:
-        return dataclasses.replace(self.source, channel=channel)
+        """Validated here, at the one place a channel becomes a URL.
+
+        Putting it at this boundary rather than only in the API means every
+        caller is covered -- the bench, a clip grab, a live run, and anything
+        added later that forgets to check.
+        """
+        return dataclasses.replace(self.source, channel=clean_channel(channel))
 
     def resolve(self, channel: str) -> str:
         """The current URL for ``channel``.

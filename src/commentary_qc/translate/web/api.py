@@ -41,6 +41,7 @@ from commentary_qc.translate.app.bench import MMC_TARGETS
 from commentary_qc.translate.infra.audio import to_wav
 from commentary_qc.translate.infra.audio_source import FFmpegAudioSource
 from commentary_qc.translate.app.live import AtCapacity, LiveRunner
+from commentary_qc.translate.core.channels import clean_channel
 from commentary_qc.translate.core.languages import tag_for_channel
 from commentary_qc.translate.core.models import ModeNotBuilt, NoAudio, NotConfigured, TranslateError
 from commentary_qc.translate.app.modes import ModeRegistry
@@ -99,6 +100,19 @@ class ScoreIn(BaseModel):
     who: str = ""
     score: int = Field(default=0, ge=bench_mod.MIN_SCORE, le=bench_mod.MAX_SCORE)
     note: str = ""
+
+
+def _safe_name(value: str) -> str:
+    """An id reduced to something safe to put in a response header.
+
+    Ids are ours and are hex, so in practice nothing is stripped. It is here
+    because the value arrives from the URL path: a quote or a newline in a
+    `content-disposition` is header injection, and the only reason it is not
+    reachable today is that an unknown id 404s before the header is built.
+    That is a coincidence of ordering, not a defence.
+    """
+    keep = [c for c in (value or "") if c.isalnum() or c in "-_"]
+    return "".join(keep)[:64] or "audio"
 
 
 def build_router(
@@ -292,13 +306,15 @@ def build_router(
         says how long it will take instead.
         """
         wiring = wire_or_501(mode, body.provider)
-        if not body.channel:
+        try:
+            channel = clean_channel(body.channel)
+        except NotConfigured as exc:
             wiring.close()
-            raise HTTPException(400, "say which channel to listen to")
+            raise HTTPException(400, str(exc)) from exc
         seconds = body.seconds or wiring.settings.grab_seconds
         try:
             captured = grab_audio(
-                body.channel,
+                channel,
                 seconds,
                 audio,
                 timeout_s=wiring.settings.grab_timeout_s,
@@ -359,8 +375,10 @@ def build_router(
                     f": {info.pending}" if info.pending else ""
                 )
             )
-        if not body.channel:
-            raise HTTPException(400, "say which channel to translate")
+        try:
+            channel = clean_channel(body.channel)
+        except NotConfigured as exc:
+            raise HTTPException(400, str(exc)) from exc
 
         wiring = wire_or_501(mode, body.provider)
         if not hasattr(wiring.provider, "open_live"):
@@ -374,7 +392,7 @@ def build_router(
         try:
             run = modes.get(mode).live(
                 wiring,
-                body.channel,
+                channel,
                 audio=audio,
                 source_language=body.source_language or "auto",
                 target_language=body.target,
@@ -467,7 +485,8 @@ def build_router(
             content=blob,
             media_type="audio/wav",
             headers={
-                "content-disposition": f'inline; filename="{run_id}-{which}.wav"',
+                "content-disposition":
+                    f'inline; filename="{_safe_name(run_id)}-{which}.wav"',
                 # Deliberately not cached: a running session grows, so the
                 # bytes behind this URL are different a second later.
                 "cache-control": "no-store",
@@ -543,8 +562,10 @@ def build_router(
         info = mode_or_501(mode).info
         if not info.built:
             raise HTTPException(501, f"{info.name} mode is not built")
-        if not body.channel:
-            raise HTTPException(400, "say which channel to capture")
+        try:
+            channel = clean_channel(body.channel)
+        except NotConfigured as exc:
+            raise HTTPException(400, str(exc)) from exc
 
         wanted = [p.strip().lower() for p in body.providers if p.strip()]
         if not wanted:
@@ -579,7 +600,7 @@ def build_router(
             # The whole fan-out, up front. Half a bench is not a comparison,
             # and finding that out after paying for half of it is the worst of
             # both outcomes.
-            allowed, why = budget.allow(body.channel, estimate["audio_seconds"])
+            allowed, why = budget.allow(channel, estimate["audio_seconds"])
             if not allowed:
                 raise HTTPException(
                     409,
@@ -590,7 +611,7 @@ def build_router(
 
         try:
             run = bench_mod.Bench(
-                body.channel, candidates, mode=mode, seconds=seconds,
+                channel, candidates, mode=mode, seconds=seconds,
                 source_language=body.source_language or "auto",
                 label=body.label, note=body.note,
             )
@@ -706,7 +727,8 @@ def build_router(
             content=blob,
             media_type=kind,
             headers={
-                "content-disposition": f'inline; filename="{bench_id}-source.wav"',
+                "content-disposition":
+                    f'inline; filename="{_safe_name(bench_id)}-source.wav"',
                 "cache-control": "private, max-age=3600, immutable",
             },
         )
@@ -739,7 +761,8 @@ def build_router(
             content=blob,
             media_type=kind,
             headers={
-                "content-disposition": f'inline; filename="{run_id}-{which}.wav"',
+                "content-disposition":
+                    f'inline; filename="{_safe_name(run_id)}-{which}.wav"',
                 # Immutable: a run never changes once stored, so the browser
                 # may keep it and seeking in the player costs no round trip.
                 "cache-control": "private, max-age=3600, immutable",

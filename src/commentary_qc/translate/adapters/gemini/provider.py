@@ -115,7 +115,7 @@ class GeminiLiveSession:
         except Exception as exc:  # noqa: BLE001
             self._shut()
             raise TranslateError(
-                f"the session refused the setup message: {exc}"
+                f"the session refused the setup message: {_safe(exc)}"
             ) from exc
 
         self._reader = threading.Thread(
@@ -445,6 +445,19 @@ def _split(data: bytes, size: int, width: int) -> Iterator[bytes]:
         yield data[start:start + size]
 
 
+def _safe(exc: object) -> str:
+    """An exception as text, with any key in it removed.
+
+    Necessary because this adapter carries its key in the URL -- the only form
+    documented for this socket -- and the WebSocket library echoes the URI in
+    several of its errors. Measured: a `GEMINI_LIVE_URL` set to `http://` by
+    mistake produces "http://host/path?key=AIza... isn't a valid URI", and
+    that string is stored in the run's error column and rendered on the page.
+    So nothing here reaches a message, a log or a database row unredacted.
+    """
+    return gp.redact(str(exc) or type(exc).__name__)
+
+
 def _opening_failed(exc: Exception) -> TranslateError:
     """Name the usual causes rather than reporting a library's text."""
     status = getattr(getattr(exc, "response", None), "status_code", None)
@@ -464,9 +477,7 @@ def _opening_failed(exc: Exception) -> TranslateError:
         )
     if status:
         return TranslateError(f"the live endpoint answered HTTP {status}")
-    return TranslateError(
-        f"could not open the live session: {exc or type(exc).__name__}"
-    )
+    return TranslateError(f"could not open the live session: {_safe(exc)}")
 
 
 def _closed_note(exc: Exception) -> str:
@@ -477,7 +488,7 @@ def _closed_note(exc: Exception) -> str:
         code = getattr(rcvd, "code", None)
         reason = reason or (getattr(rcvd, "reason", "") or "").strip()
     if code is None:
-        return f"the session ended: {exc}"
+        return f"the session ended: {_safe(exc)}"
     if int(code) == 1000:
         return reason or "the session ended normally"
     return reason or f"the session closed with code {code}"

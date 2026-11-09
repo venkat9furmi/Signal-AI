@@ -31,6 +31,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import re
 from typing import Any
 
 from commentary_qc.translate.core.models import (
@@ -167,14 +168,22 @@ def url_for(api_key: str, base: str = LIVE_URL) -> str:
     return f"{base}{joiner}key={api_key}"
 
 
-def redact(url: str) -> str:
-    """A URL safe to log: the key replaced, the rest intact."""
-    if "key=" not in url:
-        return url
-    head, _, tail = url.partition("key=")
-    rest = tail.split("&", 1)
-    remainder = f"&{rest[1]}" if len(rest) > 1 else ""
-    return f"{head}key=***{remainder}"
+#: Anything that looks like a key in a query string. Applied to arbitrary
+#: text, not just to URLs we built, because the WebSocket library echoes the
+#: URI inside its own error messages and those end up in stored rows.
+_KEYISH = re.compile(
+    r"((?:key|access_token|api_key|token)=)([^&\s\"']+)", re.I
+)
+
+
+def redact(text: str) -> str:
+    """``text`` with any key in a query string replaced.
+
+    Takes any string rather than only a URL: the places that need it most are
+    exception messages, which contain a URL somewhere in the middle of a
+    sentence.
+    """
+    return _KEYISH.sub(lambda m: f"{m.group(1)}***", text or "")
 
 
 def setup(
