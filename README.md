@@ -1,287 +1,246 @@
-# Commentary QC
+# MMC Sport Audio
 
-Automated quality checking for live football commentary at MMC Sport.
+Two things that run on the same football commentary:
 
-Commentators around Europe send live commentary to bookmakers through a
-streaming platform. Until now a person listened to each feed by ear and
-messaged the commentator when something sounded wrong. This listens instead —
-to every channel at once, continuously — and tells the commentator what to fix
-in words they can act on mid-sentence.
+- **QC Commentary** listens to every channel that is on air and says when
+  something would sound wrong to a bookmaker's customer.
+- **MMC AI Dubbing** takes a channel and translates it out loud, as it
+  happens, into another language.
 
-It hears what the bookmaker hears: the same public audio stream, about ten
-seconds behind the microphone.
+The audio is pulled once and both read it. Open <http://127.0.0.1:8642> and
+pick one.
 
-## What it detects
+---
 
-Nine faults, each with a wait so a passing blip is never reported:
+## QC Commentary
 
-| Fault | Fires when | Who fixes it |
+Interns used to sit and listen, then message a commentator on WhatsApp when
+something sounded off. This does that job, on all 52 channels at once.
+
+### What it tells you
+
+| It says | It means | What fixes it |
 |---|---|---|
-| Silence | below −50 LUFS for 12 s | mic is off or muted |
-| Holding clip | the audio repeats itself (≥0.60 correlation, 15–90 s cycle) | switch back to LIVE |
-| Distorting | 3+ samples at full scale | lower Mic gain |
-| No signal | audio stops arriving | ops — says whether one channel or many dropped |
-| Level low | minute loudness below −40, clears above −37 | raise Mic gain |
-| Level high | minute loudness above −17, clears below −19 | lower Mic gain |
-| Peaks too hot | true peak above −1 dBTP | ease Mic gain down |
-| Crowd over you | voice under 6 dB above the crowd | lower the Crowd slider |
-| Atmosphere thin | voice over 20 dB above the crowd | raise the Crowd slider |
+| **No audio** | Nothing is coming through at all | check you are live, check the encoder |
+| **Too quiet** | Below the level bookmakers expect | raise Mic gain |
+| **Too loud** | Above it | lower Mic gain |
+| **Distorting** | The signal is squared off — genuine clipping | lower Mic gain now |
+| **Peak too hot** | Close to the limit but not clipping yet | ease off a little |
+| **Buried in the crowd** | Your voice is under the atmosphere | lower the Crowd slider |
+| **No atmosphere** | No crowd bed at all | raise the Crowd slider |
+| **Holding clip playing** | A recording is on air, not a person | switch back to LIVE |
+| **Stream stopped** | We lost the feed | it says whether it is us or them |
 
-Thresholds come from a blind listening test checked against AES TD1008 and
-EBU R128. The reasoning behind every number is in the
-[rulebook](https://claude.ai/artifact/CAZMhdoPe1XWWLjP8J1cHi), and the knobs
-themselves are in `src/commentary_qc/config.py`.
+The wording matters: each one names a control the commentator actually has in
+the MOD publishing tools, rather than describing the physics.
+
+### How a commentator uses it
+
+1. Open the page and find your channel.
+2. Claim it, and pick your match from the list.
+3. It starts measuring within a couple of seconds.
+4. You get one instruction at a time, a level meter, and a ten-minute trend.
+5. When you stop, you get a match report: how long you sat inside the target
+   level, your worst peak, and every alert with how long it lasted.
+
+Claiming is also what tells us which match is on which channel — nothing else
+knows that.
+
+### Why the alerts are not noisy
+
+Three layers, because an alerting system nobody trusts is worse than none:
+
+- **Thermostats.** "Too quiet" fires below −40 and only clears above −37, so a
+  channel sitting exactly on the line produces one alert instead of a stream
+  of them. Ch.102 went from 18 alerts in a night to 5.
+- **Nothing is blamed on a recording.** Before kick-off and at half-time a
+  holding clip plays, and nobody is on air to fix it. While one is playing,
+  the level, peak and balance rules are frozen. Dead air and stream loss still
+  fire, because those matter whatever is playing.
+- **A repeated identical fault is read as a recording.** This caught us out on
+  7 November: Ch.31 reported "17 samples at full scale, +2.5 dBTP" seven times
+  over six minutes, and it was the holding clip's distortion being blamed on a
+  commentator who was not there. Real speech never peaks at exactly the same
+  sample count twice, so three identical messages now pause those rules and
+  say why.
+
+---
+
+## MMC AI Dubbing
+
+English commentary in, Greek or German voice out, over one socket, while the
+match is still going.
+
+This is **in testing**. Nothing it produces is published, and no commentator
+sees it. It exists so you can listen and decide whether a model is good
+enough to put in front of anyone.
+
+### Two paths, and the difference is the point
+
+|  | What it does | What it answers |
+|---|---|---|
+| **Live** | Streams a channel to a model and plays the translated voice back as it arrives | can this keep up with a match |
+| **Recorded clip** | Records a few seconds, then hears, translates and speaks it in three calls | does this model understand football commentary |
+
+### The models
+
+Two adapters, so you can compare rather than hope:
+
+| | Live | Clips | Greek | German | Cost |
+|---|---|---|---|---|---|
+| **Gemini** | yes | no | **yes** | yes | free on Google's free tier |
+| **Camb AI** | yes, 14 languages | yes | live: **no**, clips: yes | yes | 6 minutes free, once |
+| **Offline stand-in** | yes | yes | yes | yes | free, and deliberately sounds nothing like speech |
+
+Gemini is the one that does what MMC needs: `gemini-3.5-live-translate-preview`,
+79 languages including Greek, audio straight to translated audio. Camb's live
+path carries 14 languages and neither Greek nor Italian.
+
+Adding a third is one file in `adapters/` and one line in the registry.
+Nothing in the app or the page learns its name.
+
+### What it costs you to find out
+
+Gemini's free tier charges nothing for this model. The same page says
+free-tier input and output are "used to improve our products", so MMC's
+commentary becomes training data until somebody agrees otherwise. Worth
+knowing before a real match goes through it.
+
+There are caps either way: a daily limit on audio sent, a per-channel limit,
+and a hard ceiling on one session, all seeded from the database so a restart
+does not hand back a fresh allowance.
+
+### What is not built
+
+**Broadcasting the translated voice back into a channel.** We only ever pull
+audio; nothing here can put audio anywhere. The vendor's publishing path is
+publish-only and would need a point of our own, one per language, plus a
+jitter buffer to turn bursts of speech into an unbroken stream, plus a
+decision about what happens when another language takes longer to say than
+the English did. `app/modes/standard.py` writes the whole list down.
+
+---
 
 ## Running it
 
-```bash
-docker compose up -d --build     # start (or rebuild and restart)
+Docker, two containers from one image:
+
+```
+docker compose up -d --build     # start, or rebuild after a change
 docker compose logs -f recorder  # watch it work
-docker compose ps                # NOTE: hides exited containers; use `docker ps -a`
 docker compose down              # stop
 ```
 
-Then open <http://127.0.0.1:8642>.
+The page is on 8642. `docker compose ps` hides containers that exited — use
+`docker ps -a` when something is missing.
 
-Two services from one image: **recorder** (pulls audio, measures, alerts) and
-**web** (the commentator page). ffmpeg lives inside the image. Measurements,
-claims and logs live in the Docker volume `commentary-qc-data`, never on a host
-bind mount — SQLite in WAL mode needs shared memory that a Windows bind mount
-cannot provide, and getting that wrong makes readers silently see stale data.
+Snapshots of the database:
 
-Snapshots, safe to run while recording:
-
-```bash
-docker compose run --rm backup   # writes ./backup/live-<timestamp>.db
 ```
+docker compose run --rm backup   # writes ./backup/live-<stamp>.db
+```
+
+### Without Docker
+
+```
+pip install -r requirements.txt
+set FFMPEG_BIN=C:\path\to\ffmpeg.exe      # it will refuse to start without this
+python -m commentary_qc.watch --claims data/claims.db
+python -m commentary_qc.web
+```
+
+---
 
 ## Configuration
 
-`.slack.env` in the project root, never committed:
+Three files, none of them committed:
 
-```
-SLACK_BOT_TOKEN=xoxb-...     # Slack app with chat:write
-SLACK_CHANNEL_ID=C...        # the channel alerts go to
-QC_PASSCODE=...              # optional; required before exposing the page
-```
+| File | Holds |
+|---|---|
+| `channels.json` | MMC's 52 football channels. Read-only in the container. |
+| `.slack.env` | Slack credentials, and `QC_PASSCODE` if you want sign-in. |
+| `.translate.env` | Model API keys. See `.translate.env.example`. |
 
-`.translate.env`, also never committed, for the translation layer &mdash; see
-`.translate.env.example`. With no such file the /translate page runs on the
-free offline stand-in and the continuous pipeline stays `off`.
+API keys come from the environment and nowhere else. The page cannot write
+one, and the API neither accepts nor returns one, so no request can change
+which account gets billed.
 
-Without the Slack values the system runs normally and alerts appear only on the
-page. Without `QC_PASSCODE` the page has no login, which is fine on localhost
-and not fine anywhere else — claiming a channel starts and stops monitoring.
+**Set `QC_PASSCODE` before putting the page on any network.** Claiming a
+channel starts and stops monitoring, which makes the page a control surface
+and not just a view. While it only listens on localhost, leaving it unset is
+fine.
 
-`channels.json` lists MMC's 52 football channels and can override any threshold
-per channel. Unknown setting names are rejected at startup rather than ignored.
-
-## How a commentator uses it
-
-1. Open the page, pick the match (live and upcoming fixtures come from a public
-   feed covering 17 competitions) and the channel they are on.
-2. Claiming starts monitoring that channel within seconds and opens a Slack
-   thread carrying their name and fixture.
-3. While on air they see one instruction at a time, a loudness meter and a
-   ten-minute trend; faults also arrive in Slack.
-4. Releasing closes the thread and shows a match report: time on target, time
-   too quiet or loud, worst peak, and every fault with its duration.
-
-**Claims are what scope the system.** MMC's channels cannot be told from other
-providers' by name, number or language, so a claimed channel is an MMC channel
-by definition — and Slack only ever speaks about claimed channels.
-
-## Translation
-
-Open <http://127.0.0.1:8642/translate>. Pick a channel that is on air, press
-Start, and listen to the translation arriving while the commentary is still
-being spoken.
-
-Two paths, and the difference is the point:
-
-| | What it does | What it answers |
-|---|---|---|
-| **Live** | Streams the channel to a realtime session and plays the translated speech back as it arrives | can this keep up with a match |
-| **Recorded clip** | Records a few seconds, then transcribes, translates and speaks it in three separate calls | does this model understand football commentary |
-
-They are different products with different languages and different billing, so
-the page keeps them apart rather than presenting one as a slower version of the
-other.
-
-### Modes are execution wirings, not a volume knob
-
-A mode decides which provider is built, what it may spend, where the result is
-kept and who is allowed to see it. The endpoints are namespaced by it, so
-calling one *is* choosing the wiring rather than passing a flag something
-downstream might ignore:
-
-```
-POST /api/translate/shadow/live      -> opens a realtime session
-GET  /api/translate/shadow/live      -> captions and progress, polled
-POST /api/translate/shadow/live/<id>/stop
-GET  /api/translate/shadow/live/<id>/audio/spoken   -> playable while running
-POST /api/translate/shadow/run       -> the recorded-clip path
-POST /api/translate/standard/live    -> 501, with what building it needs
-```
-
-| Mode | Built | What it is for | Who sees the output |
-|---|---|---|---|
-| `shadow` | yes | Trying a model on real commentary and listening to it | only whoever pressed the button |
-| `standard` | no | The same work, published | commentators and the dashboard |
-
-`standard` is declared and deliberately empty &mdash; `modes/standard.py` says
-exactly what building it means. It refuses rather than falling back to shadow,
-because asking for production and silently getting the test wiring is the one
-failure nobody would notice from outside.
-
-### Live translation
-
-`wss://realtime.camb.ai/v1/realtime`. A different protocol and a different host
-from the REST adapter, so none of that plumbing is shared.
-
-* The key goes in the `x-api-key` **request header**. The docs also allow it in
-  the opening message; we never send it there, because it would land in any
-  transcript of the session.
-* Audio **up** is base64 inside JSON. The server ignores binary frames from the
-  client, so this is not negotiable, and it costs a third in bandwidth.
-* Audio **down** arrives as either a raw binary frame or a base64 field in
-  JSON. The vendor's own documents disagree about which, so we accept both:
-  guessing wrong gives a session that connects, reports progress and produces
-  no audio.
-* 24 kHz mono PCM16 both ways, which is why the live tap asks ffmpeg for 24 kHz
-  rather than reusing the 48 kHz analysis pull.
-
-One session at a time by default. Camb documents an API concurrency of 1, and a
-second session is otherwise refused by the far end only after audio has already
-started flowing &mdash; so it is refused here first, naming the channel that
-holds the slot.
-
-The budget is checked **against the clock**, every few seconds, because a
-realtime session is billed in windows rather than per call: there is no request
-boundary to check at. `QC_LIVE_SECONDS` is a hard ceiling so a session somebody
-opened and walked away from cannot run the four hours the protocol allows.
-
-#### Italian and Greek are not on the list
-
-Camb's reference prints fourteen realtime languages. `it-it` and `el-gr` are
-not among them &mdash; MMC's Italian (9 channels) and Greek (11) &mdash; while
-English, French, German and Portuguese (via `pt-br`) are. That is 32 of the 52
-channels covered and 20 not.
-
-The docs say slow mode carries more languages than fast but **never print
-either per-mode list**, so this may simply be incomplete. The page therefore
-**warns and still lets you try**: refusing on the strength of documentation we
-know is partial would be guessing, and one real session settles it.
-
-### What the recorded-clip path is
-
-Three chained calls, not one:
-
-| Step | Endpoint | Result |
-|---|---|---|
-| Hear it | `POST /transcribe` | the commentary as timed text, in the language spoken |
-| Translate it | `POST /translate` | the lines in the target language, in order |
-| Speak it | `POST /tts-stream` | the translation as WAV bytes, in one response |
-
-Camb does have a single end-to-end dubbing call, `POST /dub`, and we cannot
-use it: it fetches the media from a URL, and our clip is a few seconds held in
-memory on a host with no public address. The page says so rather than leaving
-it looking like an oversight.
-
-The page asks the *provider* what its steps are, not this file. They differ
-per vendor, and a page with either hardcoded would start lying the day the
-adapter changed.
-
-### Credit
-
-Camb publishes **no** balance, quota or usage endpoint. The only figure it
-gives is an `X-Credits-Required` response header on the call that incurred it.
-So the page shows two numbers and says which is which: our own count of
-seconds sent, which is what the cap is enforced on, and whatever the provider
-last charged. A running balance would have to be invented, and an invented
-balance is worse than none.
-
-**Guards**, because the failure mode here is a quiet bill rather than a crash:
-
-- A hard cap on audio sent per UTC day, and per channel. Seeded from the
-  database at startup, so a restart does not hand back a fresh allowance.
-- Silence is never sent. A dead channel costs a credit to be told there were
-  no words in it.
-- `PAYMENT_REQUIRED` latches the budget shut and says so once, rather than
-  filling the log with refusals.
-- A model with no key cannot be selected at all &mdash; the registry refuses
-  it before any audio is captured, instead of failing after a 15 s grab.
-- Every failure is a stored run with a status and the audio that was sent, so
-  "the model refused" and "nothing came back" look different.
-
-Configuration is `.translate.env` (see `.translate.env.example`). The API key
-comes from the environment and nowhere else; the API neither accepts nor
-returns it, so nothing a request can write changes which account is billed.
-
-### The continuous pipeline
-
-Separate from the page and off by default: `watch.py --translate shadow`
-transcribes claimed channels for the length of a match instead of one clip on
-demand. Same adapters, same budget shape, its own mode setting.
-
-```
-src/commentary_qc/translate/
-  models.py      segments, transcripts, captions, runs, failures - no vendor words
-  settings.py    every knob, validated at startup
-  ports.py       the capabilities a provider must offer: hear, translate,
-                 speak, and stream live
-  modes/         execution wirings: shadow (built), standard (declared)
-  mappers/       vendor JSON <-> our types: pure, no HTTP, unit-tested
-                 (realtime.py holds the whole WebSocket protocol, no socket)
-  providers/     one adapter per model, chosen from a registry
-  grab.py        a few seconds of a live channel, on demand
-  live.py        one realtime session: ffmpeg in, translated speech out
-  audio.py       48 kHz float32 -> the WAV a provider accepts, and PCM16 out
-  runs.py        shadow runs and their audio, so it can be played back
-  budget.py      the guard on the credits
-  segmenter.py   cuts at pauses, reusing the QC engine's own VAD
-  control.py     the continuous pipeline's runtime switch
-  pipeline.py    the continuous worker and its bounded queue
-  store.py       captions, successes and failures alike
-  api.py         the HTTP surface, namespaced by mode
-```
+---
 
 ## How it works
 
 ```
-discovery.py   which channels are broadcasting (probes the CDN, no login)
-audio_source.py  ffmpeg → 48 kHz mono PCM, reconnects on its own
-metrics.py     per 1.024 s window: loudness (BS.1770-4), true peak,
-               Silero VAD, voice/crowd separation, repeat score
-engine.py      the rules, hysteresis, escalation, clip masking
-supervisor.py  one thread per live channel; claims start and stop monitors
-store.py       SQLite, single writer, 7-day retention on measurements
-notify.py      Slack: one thread per broadcast, claimed channels only
-fixtures.py    match times from a public scoreboard feed
-report.py      the post-match summary
-web.py         the page and its API
+discovery.py      which channels are broadcasting (probes the CDN, no login)
+audio_source.py   ffmpeg -> 48 kHz mono PCM, reconnects on its own
+metrics.py        per 1.024 s: loudness (BS.1770-4), true peak, Silero VAD,
+                  voice/crowd separation, and a repeat score
+engine.py         the rules, with attack and release so nothing flaps
+supervisor.py     one thread per channel, restarted when it dies
+store.py          SQLite, one writer
+notify.py         Slack, one thread per broadcast
+web.py            the page and its API
 ```
+
+Liveness needs no login: probing the stream host agrees with the vendor's own
+panel on which channels are up, and audio analysis has never needed
+credentials of any kind.
+
+### The translation side
+
+Laid out in layers that depend inwards only, which is checked by a test:
+
+```
+translate/
+  core/      the domain. No I/O, no vendor, no framework.
+  infra/     ffmpeg, SQLite, WAV bytes.
+  adapters/  one folder per model, each behind a core port.
+  app/       the use cases: modes, sessions, budget, the bench.
+  web/       routing only.
+```
+
+`tests/test_architecture.py` reads every import and fails if one points the
+wrong way. It is how "swapping the model is one file" stays true instead of
+being something that used to be true.
+
+---
 
 ## Tests
 
-```bash
-python tests/test_dsp.py            # loudness against a reference meter
-python tests/test_engine.py         # rules, hysteresis, escalation, clip veto
-python tests/test_slack_delivery.py # Slack delivery against a fake Slack
-python tests/test_no_commentary.py  # filler detection vs labelled recordings
-python tests/test_translate.py      # translation: mappers, modes, budget, runs, pipeline
-python tests/test_live_translate.py # live: the realtime protocol, against a fake Camb WebSocket
-python tools/replay_alerts.py <db>  # replay a night through today's rules
+```
+python tests/test_architecture.py   # the dependency rule, enforced
+python tests/test_engine.py         # the rules and their hysteresis
+python tests/test_dsp.py            # loudness, true peak, VAD
+python tests/test_translate.py      # mappers, modes, budget, the clip path
+python tests/test_live_translate.py # live sessions, against a fake server
+python tests/test_gemini.py         # the Gemini adapter, against a fake server
+python tests/test_bench.py          # comparing models on one clip
+python tests/test_slack_delivery.py # delivery, against a fake Slack
+python tests/test_no_commentary.py  # the filler rule, against labelled nights
 ```
 
-The last two need the recorded databases from the September calibration work,
-which are not in the repository.
+Every vendor is tested against a fake of itself on localhost — the handshake,
+the retries, the refusals, running out of credit. None of it needs a key and
+none of it spends anything.
+
+---
 
 ## Operating notes
 
-- `uptime-guard.ps1` (Windows) starts Docker Desktop and the stack if they are
-  missing and reports to Slack when monitoring is down. Docker's restart policy
-  handles container crashes; nothing but this handles Docker itself not running.
-- Measurements older than 7 days are pruned automatically; alerts are kept.
-- The page is deliberately plain about uncertainty: if the recorder stops, it
-  says so rather than showing the last reading as if it were current.
+- **Never put the SQLite databases on a Windows bind mount.** WAL mode needs
+  shared memory a Windows mount cannot provide: the recorder writes perfectly
+  while readers see a stale file, and the page reports an outage that is not
+  happening. They live on a named volume. Only `channels.json` is bind-mounted.
+- **`FFMPEG_BIN` must be set** outside Docker. The recorder refuses to start
+  without it rather than failing quietly every thirty seconds.
+- **Smart App Control** occasionally blocks one of scipy's DLLs on import.
+  Retrying works.
+- **Never run the host scripts beside the containers.** A stale watchdog once
+  revived them alongside, producing two recorders and a stray database.
+- The match feed sends **no User-Agent** — it answers 403 to browser-like ones.
+- Measurements older than `--prune-days` (7) are dropped at startup and every
+  six hours. Alerts are never pruned.

@@ -13,7 +13,10 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from commentary_qc.config import AnalyzerConfig, Thresholds  # noqa: E402
-from commentary_qc.engine import AlertEngine  # noqa: E402
+from commentary_qc.engine import (  # noqa: E402
+    REPEAT_EVIDENCE,
+    AlertEngine,
+)
 from commentary_qc.metrics import MetricsWindow, RollingFeatures, loop_score  # noqa: E402
 
 
@@ -146,6 +149,121 @@ def test_filler_rule_fires_on_a_loop_with_crowd() -> None:
                 fired = a
     assert fired is not None, "filler_playing never fired on a crowd-bearing loop"
     assert "repeats" in fired.message, fired.message
+
+
+def test_a_repeated_identical_fault_is_read_as_a_recording() -> None:
+    """The Ch.31 incident, 7 Nov, and the fix for it.
+
+    `clipping` fired seven times with an *identical* message -- "17 samples at
+    full scale, true peak +2.5 dBTP" -- about every 30 seconds, while
+    `filler_playing` on the same channel only caught up six minutes later. The
+    identical numbers are MMC's own holding clip, so for six minutes a
+    recording's distortion was reported as the commentator's fault.
+
+    Real speech does not peak at exactly the same sample count twice. So the
+    same message, three times over, is proof enough to pause the rules a clip
+    can fake -- without waiting for the loudness-envelope test, which needs
+    three minutes of history and never covers a channel that was live and then
+    switched to a clip.
+    """
+    th = Thresholds()
+    engine = AlertEngine(th, "football-31")
+
+    # Exactly the clip's signature, and deliberately NOT looking like filler
+    # to the repeat test: loop_score stays at a live-commentary value, which
+    # is the situation that defeated the old masking.
+    clip = dict(clip_run=17, true_peak_dbtp=2.5, loop_score=0.30, loop_lag_s=44.0)
+
+    fires, notices, seq = 0, 0, 0
+    for _ in range(7):                      # seven cycles, as observed
+        for _ in range(8):                  # hold past the 3 s attack
+            seq += 1
+            for a in engine.push(_window(seq, **clip)):
+                if a.rule == "clipping" and a.event == "FIRE":
+                    fires += 1
+                if a.rule == "clip_repeat":
+                    notices += 1
+        # the clip comes round again: the fault goes away, then returns
+        for _ in range(20):
+            seq += 1
+            for a in engine.push(_window(seq, loop_score=0.30, loop_lag_s=44.0)):
+                pass
+
+    assert fires <= REPEAT_EVIDENCE - 1, (
+        f"blamed the commentator {fires} times; at most "
+        f"{REPEAT_EVIDENCE - 1} should escape before the repeat is proof"
+    )
+    assert notices == 1, f"expected one explanation, got {notices}"
+
+    # And once latched, the rules a clip can fake stay quiet.
+    before = seq
+    extra = 0
+    for _ in range(40):
+        seq += 1
+        for a in engine.push(_window(seq, **clip)):
+            if a.rule == "clipping" and a.event == "FIRE":
+                extra += 1
+    assert extra == 0, f"{extra} more clipping alerts after the verdict"
+    assert seq > before
+
+
+def test_a_changing_fault_is_still_reported() -> None:
+    """The counterpart: a fault whose numbers move is a live one.
+
+    Without this the fix would be a way to silence any persistent fault, which
+    is worse than the bug it replaces.
+    """
+    th = Thresholds()
+    engine = AlertEngine(th, "football-41")
+    fires, seq = 0, 0
+    for run_length in (12, 14, 16, 18, 20, 22, 24):
+        for _ in range(8):
+            seq += 1
+            # Different sample count and peak each time, as real speech is.
+            for a in engine.push(_window(
+                seq, clip_run=run_length,
+                true_peak_dbtp=1.0 + run_length / 10.0,
+                loop_score=0.30, loop_lag_s=44.0,
+            )):
+                if a.rule == "clipping" and a.event == "FIRE":
+                    fires += 1
+        for _ in range(20):
+            seq += 1
+            for a in engine.push(_window(seq, loop_score=0.30, loop_lag_s=44.0)):
+                pass
+    assert fires >= 3, f"a changing fault was silenced after {fires} reports"
+
+
+def test_dead_air_is_never_masked_by_the_repeat_verdict() -> None:
+    """Silence and stream loss matter whatever is playing.
+
+    A clip that has gone quiet is still a channel with no audio going to
+    bet365, so the one thing the verdict must not do is hide that.
+    """
+    th = Thresholds()
+    engine = AlertEngine(th, "football-31")
+    clip = dict(clip_run=17, true_peak_dbtp=2.5, loop_score=0.30, loop_lag_s=44.0)
+    seq = 0
+    for _ in range(4):
+        for _ in range(8):
+            seq += 1
+            engine.push(_window(seq, **clip))
+        for _ in range(20):
+            seq += 1
+            engine.push(_window(seq, loop_score=0.30, loop_lag_s=44.0))
+    assert engine._repeat_until > 0, "the verdict should be latched by now"
+
+    silent = 0
+    for _ in range(40):
+        seq += 1
+        for a in engine.push(_window(
+            seq, lufs=-70.0, lufs_short=-70.0, lufs_minute=-70.0,
+            speech_ratio=0.0, speech_ratio_med=0.0,
+            loop_score=0.30, loop_lag_s=44.0,
+        )):
+            if a.rule == "silence" and a.event == "FIRE":
+                silent += 1
+    assert silent == 1, f"dead air was masked by the recording verdict ({silent})"
 
 
 if __name__ == "__main__":

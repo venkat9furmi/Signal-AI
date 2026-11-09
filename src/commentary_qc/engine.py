@@ -260,6 +260,23 @@ _CLIP_MASKED = frozenset({
 })
 
 
+#: How many identical fault messages prove a recording. Two could be a
+#: steady signal sitting on a threshold; three with the same sample count and
+#: the same true peak to one decimal place cannot be a person -- live speech
+#: does not peak identically twice.
+REPEAT_EVIDENCE = 3
+
+#: And within how long. A playout clip comes round on a cycle of tens of
+#: seconds, so the repeats are close together. The same message an hour apart
+#: is a channel with a persistent fault, which is a real alert.
+REPEAT_WINDOW_S = 420.0
+
+#: How long the verdict stands once latched. Long enough to outlast a clip
+#: between halves, short enough that a channel which genuinely came back and
+#: then developed the same fault is heard again.
+REPEAT_HOLD_S = 600.0
+
+
 #: How bad a fault is, on a dB-ish scale where bigger is worse. A rule with an
 #: entry here can escalate: while it is up, another `escalate_step_db` of
 #: deterioration raises a fresh alert instead of sitting silent. Rules with no
@@ -294,6 +311,13 @@ class AlertEngine:
         disabled = set(thresholds.disabled_rules)
         self.rules = tuple(r for r in rules if r.id not in disabled)
         self._state: dict[str, _RuleState] = {r.id: _RuleState() for r in self.rules}
+        #: rule id -> (message, [media times it was said]). Only the rules
+        #: that a clip can fake are watched; a repeated "dead air" is a
+        #: genuinely repeated fault and must still be reported.
+        self._said: dict[str, tuple[str, list[float]]] = {}
+        #: Media time until which a repeat has convinced us this is playout.
+        self._repeat_until = 0.0
+        self._repeat_reason = ""
 
     def active_alerts(self) -> list[str]:
         return sorted(rid for rid, st in self._state.items() if st.active)
@@ -343,6 +367,12 @@ class AlertEngine:
         # Judging levels then means every restart opens with "too loud" and
         # "distorting" on channels that are only playing the vendor's clip.
         undecided = m.loop_lag_s == 0.0 and m.loop_score == 0.0
+        # A third signal, and the only one that works on a channel which was
+        # live and then switched to a clip: the same fault message, word for
+        # word, several times over. See REPEAT_EVIDENCE.
+        repeating = m.t < self._repeat_until
+        if repeating:
+            filler = True
         for rule in self.rules:
             st = self._state[rule.id]
             if undecided and not filler and rule.id in _CLIP_MASKED:
@@ -374,10 +404,19 @@ class AlertEngine:
 
             scale = _ESCALATION_SCALE.get(rule.id)
             if not st.active and hit and st.held_s >= self.th.attack_s.get(rule.id, 5.0):
+                alert = self._alert("FIRE", rule, m, st.held_s)
+                if rule.id in _CLIP_MASKED and self._is_a_recording(rule, alert, m):
+                    # The proof arrived with this very alert, so it is not
+                    # sent: saying "distorting" a third time with the same
+                    # numbers would be the third time we blamed a person for
+                    # a recorded file. The explanation goes out instead.
+                    st.held_s = st.clear_s = 0.0
+                    out.append(self._repeat_notice(m))
+                    continue
                 st.active = True
                 st.fired_at = m.t
                 st.mark = scale(m) if scale else 0.0
-                out.append(self._alert("FIRE", rule, m, st.held_s))
+                out.append(alert)
             elif st.active and hit and scale and scale(m) >= st.mark + self.th.escalate_step_db:
                 # Same fault, materially worse: say so again rather than leave
                 # the first message standing while it deteriorates.
@@ -387,6 +426,46 @@ class AlertEngine:
                 st.active = False
                 out.append(self._alert("CLEAR", rule, m, m.t - st.fired_at))
         return out
+
+    def _is_a_recording(self, rule: Rule, alert: Alert, m: MetricsWindow) -> bool:
+        """Has this exact fault message been said enough times to be playout?
+
+        Called with the alert that is about to go out, so the comparison is
+        on the words a human would read -- which is where the sample count and
+        the true peak live, and those are what a recording repeats exactly.
+        """
+        previous, times = self._said.get(rule.id, ("", []))
+        if alert.message != previous:
+            # A different message. Not a repeat, and it resets the count:
+            # a changing fault is a live one.
+            self._said[rule.id] = (alert.message, [m.t])
+            return False
+        times = [t for t in times if m.t - t <= REPEAT_WINDOW_S]
+        times.append(m.t)
+        self._said[rule.id] = (alert.message, times)
+        if len(times) < REPEAT_EVIDENCE:
+            return False
+        self._repeat_until = m.t + REPEAT_HOLD_S
+        self._repeat_reason = (
+            f"{rule.id} reported exactly the same thing {len(times)} times "
+            f"in {m.t - times[0]:.0f}s"
+        )
+        return True
+
+    def _repeat_notice(self, m: MetricsWindow) -> Alert:
+        """Say what we concluded, once, instead of the fault we suppressed."""
+        return Alert(
+            "FIRE", "clip_repeat", "info", self.channel,
+            "This looks like a recording, not someone on air: "
+            f"{self._repeat_reason}. Level, peak and balance alerts are "
+            "paused until it changes -- nobody can fix a recorded file "
+            "mid-match. Dead air and stream loss still report.",
+            m.t, m.wall, 0.0,
+            {"reason": self._repeat_reason,
+             "until_t": round(self._repeat_until, 2),
+             "loop_score": m.loop_score,
+             "loop_lag_s": m.loop_lag_s},
+        )
 
     def _alert(self, event: str, rule: Rule, m: MetricsWindow, held: float) -> Alert:
         payload = m.to_dict()

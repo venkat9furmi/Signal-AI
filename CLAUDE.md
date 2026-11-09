@@ -797,3 +797,141 @@ third parties (s.13.3(j)(i), s.13.4); our output would reach bet365's
 customers. s.10.5 makes uploaded audio model-training data. And live streaming
 on their published plans is Expert only, $900/month for 24 minutes and one
 stream. See memory `camb-ai-plans-and-terms`.
+
+## Session 8 - 2026-11-09: layers, Gemini, two front doors
+
+Five things asked for, all done: Gemini as a second adapter with Camb kept,
+the translate route built around live audio, two buttons as the way in, the
+assessment junk gone, and the architecture tightened. Decisions taken on the
+way: **live speech-to-speech** (not the chain), restructure **translate only**
+(not the proven engine), page stays **localhost with the passcode optional**,
+and **fix the clip-blame bug** while in there.
+
+### The translate package is layered now, and a test enforces it
+
+```
+translate/
+  core/      the domain. No I/O, no vendor, no framework.
+  infra/     ffmpeg, sqlite, wav bytes, the audio source.
+  adapters/  camb/ gemini/ mock/ - each behind a core port.
+  app/       modes, live sessions, grab, bench, budget, pipeline.
+  web/       routing only.
+```
+
+26 files moved, every import absolutised first so the move was a plain
+find-and-replace with no dot arithmetic. The proven QC engine was left alone
+deliberately: it is live in Docker with 7k alerts behind it, and moving it for
+tidiness would risk a working system for no functional gain.
+
+**`tests/test_architecture.py` reads every import and fails if one points the
+wrong way.** That is the difference between a layout and a rule. It found two
+real leaks the moment it existed:
+
+- `app/` and `web/` were reading **Camb's** sample rate, mode names and
+  language list. A second vendor could not have been added cleanly.
+- the offline stand-in **imported Camb** to borrow the same constants.
+
+Gemini proved why that mattered: its input is 16 kHz where Camb's is 24, and
+it has no notion of "fast" or "slow" at all. So now a session reports its own
+`AudioSpec` **per direction**, a provider reports its own modes and its own
+language caveat, and an adapter attaches the exception its error codes mean.
+Nothing outside `adapters/` names a vendor.
+
+**`AudioSource` is a port.** `app/live.py` and `app/grab.py` were building
+`FFmpegSource` and calling discovery themselves - a subprocess in the middle of
+a use case. They take the port now, the composition root hands them
+`FFmpegAudioSource`, and a live run can be driven from arrays in milliseconds,
+including a mid-run gap, which is awkward to arrange for real.
+
+**Two bugs the move surfaced.** `import realtime as rt` silently resolved to
+Camb's *session* instead of its *wire format*, because the move created two
+modules whose names collide - nothing raised. And a refused key arrived as a
+1008 close while the opening message was still being sent, so it read as "the
+session refused the opening message" rather than naming the key; the close
+reason says `invalid_api_key` and is now read.
+
+### Gemini live translation
+
+`gemini-3.5-live-translate-preview`, and it is the first adapter that can
+actually do what MMC wants: **English in, Greek or German voice out**, 79
+languages, audio straight to audio over one socket.
+
+- `wss://generativelanguage.googleapis.com/ws/...BidiGenerateContent?key=...`
+  - **the key goes in the URL**, the only documented form for this socket, so
+    nothing logs a URL without `protocol.redact`.
+- Setup is one `{"setup": {...}}` with `translationConfig` **inside**
+  `generationConfig`. Google's own docs contradict themselves here - the SDK
+  example puts it at the top level - and raw JSON is what we send, so the
+  reference wins.
+- Audio up: base64 in `realtimeInput.audio` with the MIME string **exactly**
+  `audio/pcm;rate=16000`, 100 ms chunks. Audio down: base64 nested at
+  `serverContent.modelTurn.parts[].inlineData.data`, **24 kHz**.
+- **No source-language field.** The model detects it, so a channel whose
+  configured language is wrong costs nothing here - the opposite of the clip
+  chain, where it fails the run.
+- `echoTargetLanguage` defaults **on**: with it off, an English channel
+  translated to English goes silent, which looks exactly like a broken session.
+- A connection lasts ~10 minutes and a session 15, and the server sends
+  `goAway` first. Surfaced as a note, so a run that ends early says why.
+- **Free of charge on the free tier**, which also states that free-tier input
+  and output are used to improve Google's products. MMC's commentary becomes
+  training data until somebody agrees otherwise.
+
+The provider **refuses the clip path** rather than half-implementing it:
+`transcribe`, `translate` and `speak` raise with the reason, and the page shows
+"Recorded clips: not available". Its health check deliberately does not open a
+session, because that would spend tokens every time the page loaded.
+
+### The clip-blame bug is fixed
+
+Session 5's open problem. Ch.31 reported **the same message** - "17 samples at
+full scale, true peak +2.5 dBTP" - seven times over six minutes while
+`filler_playing` lagged behind, so a holding clip's distortion was blamed on a
+commentator who was not on air. The old masking missed it because the repeat
+test needs ~3 minutes of history and the "undecided" freeze only covers the
+first 3 minutes of a *connection*, never a channel that was live and then
+switched to a clip.
+
+**The fix uses the thing that was staring at us: a fault message that repeats
+with identical numbers is itself evidence of a recording.** Live speech never
+peaks at exactly the same sample count twice. Three identical messages inside
+seven minutes latch the clip masking and emit one `clip_repeat` note instead.
+Three tests: the incident itself (7 false alerts -> at most 2 plus one
+explanation), a *changing* fault still reported (so this is not a way to
+silence a persistent real fault), and dead air never masked.
+
+### Two front doors
+
+`/` is now a landing with two buttons - **QC Commentary** and **MMC AI
+Dubbing** - because they are for different people: a commentator fixing their
+own level, and whoever is judging a model. The dashboard moved to `/qc`;
+`/translate` is unchanged and retitled. Both cards show live figures from the
+real API field names, because a landing that always reads zero says the system
+is idle when it is not.
+
+### Cleaned up
+
+The six assessment builders and scorers are gone (the listening tests are
+finished) and 98 MP3s with them: `assessment*/` went from **84 MB to 320 KB**.
+**The evidence was kept** - `labels.json`, the answer keys and the written
+results are the provenance of every threshold, and deleting them would leave
+nobody able to answer "why -40?". `clips/` and `tools/replay_alerts.py` kept.
+
+### Written down, not built: broadcasting back into a channel
+
+`app/modes/standard.py` now lists what it would take: a publishing point from
+the vendor per output language (theirs is publish-only, and writing into a
+commentator's channel is not an option), a jitter buffer to turn bursts of
+speech into an unbroken stream, a decision about what happens when another
+language takes longer to say than the English did, whether MMC wants a
+synthetic voice replacing a commentator at all, and a written answer on both
+vendors' terms given the audience is a bookmaker's customers.
+
+### State
+
+**Two adapters, shadow mode, nothing published.** Gemini needs `GEMINI_API_KEY`
+in `.translate.env`; until then both real models are correctly unselectable and
+the offline stand-in runs. README rewritten in plain language.
+
+Checks: 17 architecture, 202 translate, 121 live, 72 bench, 93 Gemini, plus the
+engine, DSP, Slack and backtest suites.

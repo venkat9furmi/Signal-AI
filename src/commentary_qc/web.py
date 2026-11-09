@@ -324,8 +324,10 @@ def create_app(
 
     app = FastAPI(title="Commentary QC", lifespan=lifespan)
     app.include_router(translate_router)
-    page = Path(__file__).parent / "static" / "claim.html"
-    translate_page = Path(__file__).parent / "static" / "translate.html"
+    static = Path(__file__).parent / "static"
+    home_page = static / "home.html"
+    page = static / "claim.html"
+    translate_page = static / "translate.html"
 
     @app.middleware("http")
     async def require_passcode(request: Request, call_next):
@@ -474,6 +476,18 @@ def create_app(
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
+        """Which of the two jobs you came for.
+
+        Two things run on the same audio and they are for different people: a
+        commentator fixing their own level, and whoever is judging whether a
+        translation model is worth publishing. Landing straight in one of them
+        meant the other was a link in a corner.
+        """
+        return home_page.read_text(encoding="utf-8")
+
+    @app.get("/qc", response_class=HTMLResponse)
+    def qc_view() -> str:
+        """The commentator and producer dashboard."""
         return page.read_text(encoding="utf-8")
 
     @app.get("/translate", response_class=HTMLResponse)

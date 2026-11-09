@@ -22,6 +22,37 @@ change:
   Keeping both sides of every translation on every channel all match day is a
   different storage problem and almost certainly not wanted.
 
+**And the open one: broadcasting the translated audio back into a channel.**
+
+Shadow mode answers "is this any good" by letting a person listen. A product
+means the translated voice reaching an audience, and today nothing here can
+put audio anywhere -- we only ever pull. What it would take, written down so
+the size of it is known:
+
+* **A publishing point.** Commentary reaches the platform by RTMP, to
+  ``rtmp://origin.mediaondemand.net/commentaries/<channel>/live``, and that
+  path is publish-only -- we proved it is not pullable in September. Pushing
+  a translated channel means a publishing point of our own from the vendor,
+  one per output language, which is a conversation with Matt and not a code
+  change. Writing into an existing commentator's channel is not an option:
+  it is their channel and their voice.
+* **Continuous audio, not segments.** A listener needs an unbroken stream.
+  The models return speech in bursts with silence between, and a live
+  translation runs behind and sometimes ahead of the source, so something has
+  to fill the gaps and absorb the drift. That is a jitter buffer and a timing
+  policy, and it is the hard part.
+* **A decision about what happens when it falls behind.** Another language
+  takes a different length of time to say. Either the voice speeds up, or it
+  drops audio, or it drifts further behind the match. There is no fourth
+  option, and which one is right is a product decision about what a listener
+  would rather have.
+* **Whose voice it is.** A synthetic voice reading translated commentary
+  replaces the commentator rather than helping them. Whether MMC and the
+  bookmaker want that is the first question, and it is not ours to answer.
+* **Terms.** Both model vendors restrict what their output may be used for,
+  and the audience here is a bookmaker's customers. That needs a written
+  answer before anything is published, not after.
+
 The reason it is not built now is that there is nothing to promote yet: what
 the model produces on real commentary has not been listened to. Shadow mode
 exists to answer that, and until it has, a production wiring would be a guess

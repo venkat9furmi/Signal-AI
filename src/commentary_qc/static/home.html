@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MMC Sport Audio</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230b0b0c'/><rect x='7' y='13' width='3' height='6' rx='1.5' fill='%23ffd400'/><rect x='12.5' y='8' width='3' height='16' rx='1.5' fill='%23ffd400'/><rect x='18' y='11' width='3' height='10' rx='1.5' fill='%23ffd400'/><rect x='23.5' y='14' width='3' height='4' rx='1.5' fill='%23ffd400'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root{
+  --ground:#0b0b0c; --surface:#151517; --raised:#1c1c20;
+  --line:#2a2a30; --line-2:#3b3b43;
+  --ink:#f7f7f2; --ink-2:#b9b9b1; --dim:#84847b;
+  --yellow:#ffd400; --yellow-ink:#0b0b0c; --yellow-soft:rgba(255,212,0,.13);
+  --amber:#ff9d00; --red:#ff4d3d; --good:#4fd07a; --idle:#5e5e57;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{
+  margin:0;min-height:100vh;background:var(--ground);color:var(--ink);
+  font:15px/1.55 "IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  -webkit-font-smoothing:antialiased;
+  display:flex;flex-direction:column;
+}
+a{color:inherit;text-decoration:none}
+.mono{font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace;font-variant-numeric:tabular-nums}
+.cond{font-family:"Barlow Condensed","Arial Narrow",sans-serif}
+.lbl{font-family:"Barlow Condensed","Arial Narrow",sans-serif;font-weight:600;
+  text-transform:uppercase;letter-spacing:.14em;font-size:12.5px;color:var(--dim)}
+:focus-visible{outline:2px solid var(--yellow);outline-offset:3px}
+
+.wrap{width:100%;max-width:1060px;margin:0 auto;padding:0 24px}
+
+/* -- the bar ----------------------------------------------------------- */
+header{border-bottom:1px solid var(--line);padding:16px 0}
+header .wrap{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.brand{display:flex;align-items:baseline;gap:9px}
+.brand .mk{
+  font-family:"Barlow Condensed",sans-serif;font-weight:700;font-size:22px;
+  letter-spacing:.06em;background:var(--yellow);color:var(--yellow-ink);
+  padding:1px 8px;border-radius:3px;
+}
+.brand .nm{font-family:"Barlow Condensed",sans-serif;font-weight:600;
+  font-size:20px;letter-spacing:.04em;color:var(--ink-2)}
+header .clock{margin-left:auto;color:var(--dim);font-size:13px}
+
+/* -- the choice -------------------------------------------------------- */
+main{flex:1;display:flex;align-items:center;padding:48px 0}
+.hero{margin:0 0 6px;font-family:"Barlow Condensed",sans-serif;font-weight:700;
+  font-size:clamp(34px,6vw,56px);line-height:1.02;letter-spacing:-.01em}
+.hero em{font-style:normal;color:var(--yellow)}
+.sub{margin:0 0 36px;color:var(--ink-2);max-width:62ch;font-size:16px}
+
+.choices{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(290px,1fr))}
+.choice{
+  display:flex;flex-direction:column;gap:12px;
+  border:1px solid var(--line);background:var(--surface);
+  border-radius:4px;padding:26px 24px 22px;
+  transition:border-color .15s,transform .15s,background .15s;
+}
+.choice:hover,.choice:focus-visible{
+  border-color:var(--yellow);background:var(--raised);transform:translateY(-2px);
+}
+.choice .icon{color:var(--yellow);height:30px}
+.choice h2{
+  margin:0;font-family:"Barlow Condensed",sans-serif;font-weight:700;
+  font-size:30px;letter-spacing:.01em;line-height:1.05;
+}
+.choice p{margin:0;color:var(--ink-2);font-size:14.5px;flex:1}
+.choice .go{
+  display:inline-flex;align-items:center;gap:8px;margin-top:4px;
+  font-family:"Barlow Condensed",sans-serif;font-weight:600;font-size:15px;
+  text-transform:uppercase;letter-spacing:.12em;color:var(--yellow);
+}
+.choice .go svg{transition:transform .15s}
+.choice:hover .go svg{transform:translateX(4px)}
+
+/* a line of live facts, so the page is not a dead menu */
+.facts{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;
+  padding-top:14px;border-top:1px solid var(--line)}
+.fact{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--ink-2)}
+.fact + .fact::before{content:"";width:1px;height:12px;background:var(--line-2);
+  margin-right:7px}
+.fact b{color:var(--ink);font-family:"IBM Plex Mono",monospace;font-weight:600}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--idle);flex:none}
+.dot.on{background:var(--good)}
+.dot.warn{background:var(--amber)}
+.dot.off{background:var(--red)}
+.fact.muted{color:var(--dim)}
+
+footer{border-top:1px solid var(--line);padding:16px 0;color:var(--dim);font-size:13px}
+footer .wrap{display:flex;gap:18px;flex-wrap:wrap;align-items:center}
+footer a{color:var(--dim);border-bottom:1px solid transparent}
+footer a:hover{color:var(--yellow);border-bottom-color:var(--yellow)}
+
+@media (prefers-reduced-motion:reduce){
+  .choice,.choice .go svg{transition:none}
+  .choice:hover{transform:none}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="brand"><span class="mk">MMC</span><span class="nm">Sport Audio</span></div>
+    <span class="clock mono" id="clock"></span>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <h1 class="hero">Two jobs on<br>the same <em>audio</em>.</h1>
+    <p class="sub">
+      Every football channel MMC broadcasts is pulled once. One side listens
+      for anything that would sound wrong to a bookmaker's customer. The other
+      turns the commentary into another language, out loud.
+    </p>
+
+    <div class="choices">
+      <a class="choice" href="/qc">
+        <svg class="icon" viewBox="0 0 44 30" fill="none" aria-hidden="true">
+          <rect x="1"  y="11" width="4" height="8"  rx="2" fill="currentColor" opacity=".45"/>
+          <rect x="8"  y="7"  width="4" height="16" rx="2" fill="currentColor" opacity=".65"/>
+          <rect x="15" y="1"  width="4" height="28" rx="2" fill="currentColor"/>
+          <rect x="22" y="9"  width="4" height="12" rx="2" fill="currentColor" opacity=".65"/>
+          <rect x="29" y="13" width="4" height="4"  rx="2" fill="currentColor" opacity=".45"/>
+          <rect x="36" y="5"  width="4" height="20" rx="2" fill="currentColor" opacity=".8"/>
+        </svg>
+        <h2>QC Commentary</h2>
+        <p>
+          Watch every channel that is on air. Claim yours and it starts
+          measuring within seconds, then tells you plainly if you are too
+          quiet, too loud, buried under the crowd, or off air.
+        </p>
+        <div class="facts" id="qcFacts">
+          <span class="fact muted">checking&hellip;</span>
+        </div>
+        <span class="go">Open
+          <svg width="16" height="10" viewBox="0 0 16 10" fill="none" aria-hidden="true">
+            <path d="M1 5h13M10 1l4 4-4 4" stroke="currentColor" stroke-width="1.8"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+      </a>
+
+      <a class="choice" href="/translate">
+        <svg class="icon" viewBox="0 0 44 30" fill="none" aria-hidden="true">
+          <path d="M3 15c3-7 7-7 10 0s7 7 10 0 7-7 10 0 5 5 8 0" stroke="currentColor"
+                stroke-width="2.2" stroke-linecap="round" opacity=".55"/>
+          <path d="M3 22c3-4 7-4 10 0s7 4 10 0 7-4 10 0" stroke="currentColor"
+                stroke-width="2.2" stroke-linecap="round"/>
+        </svg>
+        <h2>MMC AI Dubbing</h2>
+        <p>
+          Take a channel that is on air and hear it translated as it happens,
+          in a voice. Pick the model, pick the language, press start. Nothing
+          is published while this is in testing.
+        </p>
+        <div class="facts" id="dubFacts">
+          <span class="fact muted">checking&hellip;</span>
+        </div>
+        <span class="go">Open
+          <svg width="16" height="10" viewBox="0 0 16 10" fill="none" aria-hidden="true">
+            <path d="M1 5h13M10 1l4 4-4 4" stroke="currentColor" stroke-width="1.8"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+      </a>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>MMC Sport &middot; football commentary</span>
+    <a href="/qc">QC Commentary</a>
+    <a href="/translate">AI Dubbing</a>
+    <a href="/healthz">Health</a>
+  </div>
+</footer>
+
+<script>
+"use strict";
+const el = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g,
+  (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function tick() {
+  el("clock").textContent = new Date().toLocaleTimeString([], {
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  });
+}
+tick();
+setInterval(tick, 1000);
+
+function fact(state, text) {
+  return `<span class="fact"><i class="dot ${state}"></i>${text}</span>`;
+}
+
+/* A menu that cannot say whether anything is running is just a menu. Both
+   cards report the one or two numbers that decide whether it is worth
+   clicking, and say so plainly when the server cannot be reached. */
+async function load(path) {
+  const r = await fetch(path, { headers: { accept: "application/json" } });
+  if (!r.ok) throw new Error(r.status === 401 ? "sign in first" : r.statusText);
+  return r.json();
+}
+
+async function qc() {
+  try {
+    const d = await load("/api/channels");
+    const s = d.summary || {};
+    /* The names here are the ones /api/channels actually uses. Worth being
+       exact: a landing card that always reads zero is worse than no card,
+       because it says the system is idle when it is not. */
+    const rec = s.recorder || {};
+    const live = s.mmc_broadcasting ?? 0;
+    const measured = s.measured ?? 0;
+    const faults = s.faults ?? 0;
+    const claimed = s.claimed ?? 0;
+    el("qcFacts").innerHTML =
+      fact(rec.running ? "on" : "off",
+           rec.running
+             ? `recorder on, <b>${esc((rec.monitoring || []).length)}</b>&nbsp;watched`
+             : (rec.seen ? "recorder stopped" : "recorder not running")) +
+      fact(live ? "on" : "", `<b>${esc(live)}</b>&nbsp;on air`) +
+      (measured ? fact("on", `<b>${esc(measured)}</b>&nbsp;measured`) : "") +
+      fact(faults ? "warn" : "on", `<b>${esc(faults)}</b>&nbsp;faults`) +
+      (claimed ? fact("on", `<b>${esc(claimed)}</b>&nbsp;claimed`) : "");
+  } catch (e) {
+    el("qcFacts").innerHTML =
+      `<span class="fact muted">cannot reach the server &mdash; ${esc(e.message || e)}</span>`;
+  }
+}
+
+async function dubbing() {
+  try {
+    const d = await load("/api/translate/shadow/model");
+    const live = d.live || {};
+    const ready = !!live.available;
+    const others = (d.providers || []).filter((p) => p.selectable).length;
+    el("dubFacts").innerHTML =
+      fact(ready ? "on" : "warn", `model <b>${esc(d.provider || "none")}</b>`) +
+      fact(ready ? "on" : "warn", ready ? "live translation ready" : "live not available") +
+      fact("", `<b>${esc(others)}</b>&nbsp;of ${esc((d.providers || []).length)} usable`);
+  } catch (e) {
+    el("dubFacts").innerHTML =
+      `<span class="fact muted">cannot reach the server &mdash; ${esc(e.message || e)}</span>`;
+  }
+}
+
+qc();
+dubbing();
+setInterval(qc, 15000);
+</script>
+</body>
+</html>
