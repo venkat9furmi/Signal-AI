@@ -13,6 +13,7 @@ from typing import Any, Callable
 from commentary_qc.translate.core.models import NotConfigured
 from commentary_qc.translate.settings import TranslateSettings
 from commentary_qc.translate.adapters.camb.provider import CambProvider
+from commentary_qc.translate.adapters.gemini.provider import GeminiProvider
 from commentary_qc.translate.adapters.mock.provider import MockProvider
 
 #: name -> factory. A factory takes the settings and returns something
@@ -20,6 +21,7 @@ from commentary_qc.translate.adapters.mock.provider import MockProvider
 FACTORIES: dict[str, Callable[[TranslateSettings], Any]] = {
     "mock": lambda s: MockProvider(s),
     "camb": lambda s: CambProvider(s),
+    "gemini": lambda s: GeminiProvider(s),
 }
 
 #: What each one is, in words the page can show.
@@ -30,6 +32,15 @@ DESCRIPTIONS: dict[str, dict[str, str]] = {
                   "words are deliberately marked so nobody mistakes them for a "
                   "translation. Use it to measure segmenting, latency and volume.",
         "cost": "free",
+    },
+    "gemini": {
+        "title": "Gemini live translation",
+        "detail": "One model, audio straight to translated audio over a "
+                  "socket. Live only - it has no endpoint for a recorded "
+                  "clip. Needs GEMINI_API_KEY. Free of charge on Google's "
+                  "free tier, which also uses what you send to improve their "
+                  "products.",
+        "cost": "free tier",
     },
     "camb": {
         "title": "Camb AI",
@@ -60,6 +71,8 @@ def blocked_reason(name: str, settings: TranslateSettings) -> str:
                 f"{list(settings.enabled_providers)}")
     if key == "camb" and not settings.camb_api_key:
         return "CAMB_API_KEY is not set"
+    if key == "gemini" and not settings.gemini_api_key:
+        return "GEMINI_API_KEY is not set"
     return ""
 
 
@@ -99,4 +112,4 @@ def describe(settings: TranslateSettings) -> list[dict]:
 
 
 __all__ = ["FACTORIES", "available", "blocked_reason", "build", "describe",
-           "CambProvider", "MockProvider"]
+           "CambProvider", "GeminiProvider", "MockProvider"]

@@ -60,7 +60,7 @@ class TranslateSettings:
     #: Adapters that may be selected at all. A provider switched off here
     #: cannot be turned on from the page, which is what keeps a paid model
     #: from being enabled by accident.
-    enabled_providers: tuple[str, ...] = ("mock", "camb")
+    enabled_providers: tuple[str, ...] = ("mock", "camb", "gemini")
     #: What everything is translated into.
     target_language: str = "en-us"
 
@@ -174,6 +174,20 @@ class TranslateSettings:
     #: Container for the spoken audio. WAV because every browser plays it
     #: without a codec question; Camb also offers flac, mp3, adts and raw PCM.
     camb_audio_format: str = "wav"
+
+    # -- Gemini ----------------------------------------------------------
+    #: From the environment and nowhere else, like every other key: nothing a
+    #: request can write changes which account is billed.
+    gemini_api_key: str = ""
+    #: The live translation model. A preview, so the name is configurable
+    #: rather than compiled in -- Google renames preview models.
+    gemini_model: str = ""
+    #: Overridden only by the tests, to point at a fake on localhost.
+    gemini_live_url: str = ""
+    #: Speak even when the audio is already in the target language. On by
+    #: default: the alternative is a session that goes silent on an English
+    #: channel translated to English, which looks exactly like a broken one.
+    gemini_echo_target: bool = True
 
     raw: dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
 
@@ -306,6 +320,16 @@ class TranslateSettings:
             data["camb_speech_model"] = env["CAMB_SPEECH_MODEL"].strip()
         if env.get("CAMB_AUDIO_FORMAT"):
             data["camb_audio_format"] = env["CAMB_AUDIO_FORMAT"].strip().lower()
+        if env.get("GEMINI_API_KEY"):
+            data["gemini_api_key"] = env["GEMINI_API_KEY"].strip()
+        if env.get("GEMINI_MODEL"):
+            data["gemini_model"] = env["GEMINI_MODEL"].strip()
+        if env.get("GEMINI_LIVE_URL"):
+            data["gemini_live_url"] = env["GEMINI_LIVE_URL"].strip()
+        if env.get("GEMINI_ECHO_TARGET"):
+            data["gemini_echo_target"] = (
+                env["GEMINI_ECHO_TARGET"].strip().lower() not in ("0", "false", "no")
+            )
         if env.get("CAMB_API_KEY"):
             data["camb_api_key"] = env["CAMB_API_KEY"].strip()
         if env.get("CAMB_API_BASE"):
