@@ -1,5 +1,9 @@
 # MMC Sport Audio
 
+**New here?** Read [ARCHITECTURE.md](ARCHITECTURE.md) — it explains how the
+whole thing is put together, walks a piece of audio through every flow, and
+ends with the to-do list. This file is the shorter operator's guide.
+
 Two things that run on the same football commentary:
 
 - **QC Commentary** listens to every channel that is on air and says when
@@ -243,7 +247,8 @@ things a review on 9 November turned up:
   containing the whole key, which would have been stored in a run's error
   column and shown on the page. Every exception is redacted now.
 - **A channel name reaches a URL builder and then ffmpeg.** `../../x`,
-  `x
+  `x
+
 y` and a 300-character name were all accepted and started a run.
   A channel is now validated where it becomes a URL, so every caller is
   covered rather than just the endpoint that remembered to check.
