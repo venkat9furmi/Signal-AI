@@ -24,9 +24,9 @@ the whole thing on real matches and stores every result without publishing
 any of it, so what goes to production is exactly what was measured.
 """
 
-from .models import AudioSegment, Caption, Transcript, Translation, TranslateError
-from .pipeline import ChannelTap, TranslationPipeline
-from .settings import Mode, TranslateSettings
+from commentary_qc.translate.core.models import AudioSegment, Caption, Transcript, Translation, TranslateError
+from commentary_qc.translate.app.pipeline import ChannelTap, TranslationPipeline
+from commentary_qc.translate.settings import Mode, TranslateSettings
 
 __all__ = [
     "AudioSegment",

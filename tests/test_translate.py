@@ -30,13 +30,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from commentary_qc.store import EventStore  # noqa: E402
 from commentary_qc.translate import TranslateSettings, TranslationPipeline  # noqa: E402
-from commentary_qc.translate import control as control_mod  # noqa: E402
-from commentary_qc.translate.audio import to_wav, wav_seconds  # noqa: E402
-from commentary_qc.translate.budget import Budget  # noqa: E402
-from commentary_qc.translate.mappers import camb as cm  # noqa: E402
-from commentary_qc.translate.mappers import tts as tm  # noqa: E402
-from commentary_qc.translate.mappers.languages import LanguageMap  # noqa: E402
-from commentary_qc.translate.models import (  # noqa: E402
+from commentary_qc.translate.app import control as control_mod  # noqa: E402
+from commentary_qc.translate.infra.audio import to_wav, wav_seconds  # noqa: E402
+from commentary_qc.translate.app.budget import Budget  # noqa: E402
+from commentary_qc.translate.adapters.camb import mapper as cm  # noqa: E402
+from commentary_qc.translate.adapters.camb import tts as tm  # noqa: E402
+from commentary_qc.translate.core.languages import LanguageMap  # noqa: E402
+from commentary_qc.translate.core.models import (  # noqa: E402
     AudioSegment,
     ModeNotBuilt,
     NotConfigured,
@@ -44,14 +44,14 @@ from commentary_qc.translate.models import (  # noqa: E402
     ProviderFailed,
     RateLimited,
 )
-from commentary_qc.translate.modes import ModeRegistry  # noqa: E402
-from commentary_qc.translate.providers import build, describe  # noqa: E402
-from commentary_qc.translate.providers.camb import CambProvider  # noqa: E402
-from commentary_qc.translate.providers.mock import MockProvider  # noqa: E402
-from commentary_qc.translate.runs import RunStore  # noqa: E402
-from commentary_qc.translate.segmenter import Segmenter  # noqa: E402
+from commentary_qc.translate.app.modes import ModeRegistry  # noqa: E402
+from commentary_qc.translate.adapters import build, describe  # noqa: E402
+from commentary_qc.translate.adapters.camb.provider import CambProvider  # noqa: E402
+from commentary_qc.translate.adapters.mock.provider import MockProvider  # noqa: E402
+from commentary_qc.translate.infra.runs import RunStore  # noqa: E402
+from commentary_qc.translate.app.segmenter import Segmenter  # noqa: E402
 from commentary_qc.translate.settings import Mode  # noqa: E402
-from commentary_qc.translate.store import CaptionStore  # noqa: E402
+from commentary_qc.translate.infra.captions import CaptionStore  # noqa: E402
 
 PASS, FAIL = 0, 0
 

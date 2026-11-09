@@ -19,11 +19,11 @@ import signal
 import sys
 import time
 
-from .audio_source import FFmpegSource
-from .config import Settings
-from .discovery import StreamNotFound, resolve
-from .engine import AlertEngine
-from .metrics import WindowAnalyzer
+from commentary_qc.audio_source import FFmpegSource
+from commentary_qc.config import Settings
+from commentary_qc.discovery import StreamNotFound, resolve
+from commentary_qc.engine import AlertEngine
+from commentary_qc.metrics import WindowAnalyzer
 
 log = logging.getLogger("commentary_qc")
 

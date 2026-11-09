@@ -23,7 +23,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
-from .config import SourceConfig
+from commentary_qc.config import SourceConfig
 
 log = logging.getLogger(__name__)
 

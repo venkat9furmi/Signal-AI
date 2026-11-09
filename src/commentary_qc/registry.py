@@ -24,8 +24,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
-from .config import SourceConfig
-from .discovery import ProbeFailed, StreamNotFound, resolve
+from commentary_qc.config import SourceConfig
+from commentary_qc.discovery import ProbeFailed, StreamNotFound, resolve
 
 log = logging.getLogger(__name__)
 

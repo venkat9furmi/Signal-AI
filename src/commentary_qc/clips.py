@@ -23,8 +23,8 @@ import threading
 import time
 from pathlib import Path
 
-from .config import SourceConfig
-from .discovery import StreamNotFound, resolve
+from commentary_qc.config import SourceConfig
+from commentary_qc.discovery import StreamNotFound, resolve
 
 log = logging.getLogger(__name__)
 

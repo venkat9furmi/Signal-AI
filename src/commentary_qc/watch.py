@@ -19,13 +19,13 @@ import signal
 import sys
 import threading
 
-from .config import Settings
-from .notify import SlackNotifier
-from .registry import Registry, default_channels
-from .store import EventStore
-from .supervisor import Supervisor
-from .translate import TranslationPipeline, TranslateSettings
-from .translate.settings import Mode
+from commentary_qc.config import Settings
+from commentary_qc.notify import SlackNotifier
+from commentary_qc.registry import Registry, default_channels
+from commentary_qc.store import EventStore
+from commentary_qc.supervisor import Supervisor
+from commentary_qc.translate import TranslationPipeline, TranslateSettings
+from commentary_qc.translate.settings import Mode
 
 log = logging.getLogger("commentary_qc.watch")
 

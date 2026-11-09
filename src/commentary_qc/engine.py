@@ -17,8 +17,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Iterable
 
-from .config import WINDOW_SECONDS, Thresholds
-from .metrics import MetricsWindow
+from commentary_qc.config import WINDOW_SECONDS, Thresholds
+from commentary_qc.metrics import MetricsWindow
 
 #: A rule returns True (fault present), False (fault absent), or None when the
 #: window carries no evidence either way -- e.g. the crowd balance cannot be

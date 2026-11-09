@@ -106,6 +106,66 @@
     .cap { grid-template-columns: 54px 1fr; }
     .cap .s { grid-column: 2; }
   }
+  /* the coverage matrix */
+  .matrix { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .matrix th, .matrix td {
+    padding: 7px 10px; text-align: left; border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  .matrix th { color: var(--dim); font-weight: 500; font-size: 12px;
+               text-transform: uppercase; letter-spacing: .06em; }
+  .matrix td.v { text-align: center; font-weight: 600; }
+  .v-yes  { color: var(--good); }
+  .v-near { color: var(--yellow); }
+  .v-no   { color: var(--bad); opacity: .8; }
+  .v-unknown { color: var(--dim); }
+
+  /* ticky boxes for models and languages */
+  .picks { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 0; }
+  .pick {
+    display: inline-flex; align-items: center; gap: 7px;
+    border: 1px solid var(--line); padding: 6px 11px; border-radius: 2px;
+    font-size: 14px; cursor: pointer; user-select: none;
+  }
+  .pick:hover { border-color: var(--yellow); }
+  .pick input { accent-color: var(--yellow); margin: 0; }
+  .pick.off { opacity: .45; cursor: not-allowed; }
+  .pick.off:hover { border-color: var(--line); }
+  .pick small { color: var(--dim); }
+
+  /* blind entries */
+  .entries {
+    display: grid; gap: 14px; margin: 16px 0 0;
+    grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  }
+  .entry { border: 1px solid var(--line); padding: 14px; border-radius: 2px; }
+  .entry.top { border-color: var(--yellow); }
+  .entry h4 {
+    margin: 0 0 10px; font-size: 15px; display: flex;
+    align-items: baseline; gap: 9px;
+  }
+  .entry .tagline { font-size: 34px; line-height: 1; color: var(--yellow);
+                    font-family: "Barlow Condensed", sans-serif; }
+  .entry audio { width: 100%; margin: 0 0 10px; }
+  .entry blockquote {
+    margin: 0 0 10px; padding: 0 0 0 10px; border-left: 2px solid var(--line);
+    font-size: 14px; line-height: 1.5;
+  }
+  .entry blockquote.empty { color: var(--dim); font-style: italic; }
+  .who { display: flex; gap: 2px; margin: 10px 0 0; }
+  .who button {
+    flex: 1; padding: 7px 0; font-size: 14px; background: transparent;
+    color: var(--dim); border: 1px solid var(--line); cursor: pointer;
+  }
+  .who button:hover { color: var(--yellow); border-color: var(--yellow); }
+  .who button.mine { background: var(--yellow); color: #000;
+                     border-color: var(--yellow); }
+  .said { margin: 8px 0 0; font-size: 12px; color: var(--dim); }
+  .reveal-name {
+    margin: 10px 0 0; font-size: 13px; color: var(--yellow);
+    letter-spacing: .04em; text-transform: uppercase;
+  }
+
   .warn-box {
     border-left: 3px solid var(--warn); padding: 8px 12px; margin: 14px 0 0;
     color: var(--warn); font-size: 14px; background: rgba(255,180,0,.06);
@@ -257,6 +317,19 @@
   </section>
 
   <section>
+    <h2>1b &middot; Which model reaches which language</h2>
+    <div class="card">
+      <p class="note" style="margin:0 0 12px">
+        Asked before a comparison rather than discovered during one. With all
+        six of MMC's languages as targets, some models drop out immediately
+        &mdash; and a table saying so costs nothing, where six failed entries
+        cost a capture and whatever they were billed for.
+      </p>
+      <div class="scroll"><table class="matrix" id="coverage"></table></div>
+    </div>
+  </section>
+
+  <section>
     <h2>2 &middot; Credit</h2>
     <div class="card" id="credits">&hellip;</div>
   </section>
@@ -265,8 +338,40 @@
     <h2>3 &middot; Translate it</h2>
     <div class="card">
       <div class="tabs">
-        <button class="tab on" id="tab-live">Live, as it happens</button>
-        <button class="tab" id="tab-clip">A recorded clip</button>
+        <button class="tab on" id="tab-bench">Compare models</button>
+        <button class="tab" id="tab-live">Live, as it happens</button>
+        <button class="tab" id="tab-clip">One model, one clip</button>
+      </div>
+
+      <div id="pane-bench">
+        <div class="form">
+          <div style="flex:2 1 220px">
+            <label for="bench-channel">Channel</label>
+            <select id="bench-channel" style="width:100%"></select>
+          </div>
+          <div style="flex:0 1 110px">
+            <label for="bench-seconds">Seconds</label>
+            <input id="bench-seconds" type="number" min="3" max="60" step="1"
+                   value="15" style="width:100%">
+          </div>
+          <div style="flex:2 1 240px">
+            <label for="bench-label">What is this comparison for?</label>
+            <input id="bench-label" type="text" style="width:100%"
+                   placeholder="e.g. Greek output, first pass">
+          </div>
+        </div>
+
+        <label style="display:block;margin:14px 0 0">Models</label>
+        <div class="picks" id="bench-providers"></div>
+
+        <label style="display:block;margin:14px 0 0">Translate into</label>
+        <div class="picks" id="bench-targets"></div>
+
+        <div class="form" style="margin-top:16px;align-items:center">
+          <button id="go-bench">Run the comparison</button>
+          <p class="note" id="bench-estimate" style="margin:0"></p>
+        </div>
+        <p class="status" id="bench-status"></p>
       </div>
 
       <div id="pane-live">
@@ -311,12 +416,13 @@
   </section>
 
   <section>
-    <h2>4 &middot; Listen</h2>
+    <h2>4 &middot; Listen and judge</h2>
     <div class="card" id="listen">
       <p class="sub" style="margin:0">
         Nothing yet. Pick a channel that is on air and press Start.
       </p>
     </div>
+    <div id="bench-view"></div>
     <div class="scroll">
       <table class="history" id="history" hidden>
         <thead><tr>
@@ -325,6 +431,18 @@
         </tr></thead>
         <tbody></tbody>
       </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>5 &middot; What the team concluded</h2>
+    <div class="card">
+      <p class="note" style="margin:0 0 12px">
+        Every judgement anyone has recorded, by model and target language.
+        Ranked by mean score, then by how many people backed it &mdash; a 5.0
+        from one person is not better evidence than a 4.6 from six.
+      </p>
+      <div class="scroll"><table class="matrix" id="scoreboard"></table></div>
     </div>
   </section>
 
@@ -423,6 +541,15 @@ async function loadModel() {
       ${others.map((p) => esc(p.name) + (p.selectable ? "" : ` &mdash; ${esc(p.blocked)}`)).join("; ")}.</p>` : ""}
   `;
 
+  pickBoxes("bench-providers", (d.providers || []).map((p) => ({
+    value: p.name,
+    text: p.title || p.name,
+    note: p.cost === "free" ? "free" : "",
+    on: p.selectable,
+    off: !p.selectable,
+    title: p.selectable ? p.detail : p.blocked,
+  })));
+
   const langs = d.languages || [];
   el("target").innerHTML = (langs.length
     ? langs.map((l) =>
@@ -467,9 +594,11 @@ async function loadCredits() {
 /* -- 3. channels and the run ----------------------------------------- */
 async function loadChannels() {
   const d = await get(`/api/translate/${MODE}/channels`);
-  el("channel").innerHTML = d.channels.map((c) =>
+  const options = d.channels.map((c) =>
     `<option value="${esc(c.channel)}">${esc(c.label)} &mdash; ${esc(c.language || "?")}</option>`
   ).join("");
+  el("channel").innerHTML = options;
+  el("bench-channel").innerHTML = options;
 }
 
 async function runOnce() {
@@ -679,6 +808,263 @@ function showLive(s) {
   }
 }
 
+/* -- 1b. coverage ----------------------------------------------------- */
+const VERDICT = { yes: "\u2713", near: "\u2248", no: "\u2717", unknown: "?" };
+
+async function loadCoverage() {
+  const d = await get(`/api/translate/${MODE}/coverage`);
+  const head = `<thead><tr><th>Model</th>` +
+    d.targets.map((t) => `<th style="text-align:center">${esc(t)}</th>`).join("") +
+    `<th>Catalogue</th></tr></thead>`;
+  const body = d.providers.map((p) => `
+    <tr>
+      <td><b>${esc(p.title || p.provider)}</b>${
+        p.selectable ? "" : `<br><small style="color:var(--dim)">${esc(p.blocked || p.error)}</small>`
+      }</td>
+      ${d.targets.map((t) => {
+        const v = (p.targets || {})[t] || "unknown";
+        return `<td class="v v-${v}" title="${esc(v)}">${VERDICT[v] || "?"}</td>`;
+      }).join("")}
+      <td>${p.catalogue || "\u2014"}</td>
+    </tr>`).join("");
+  el("coverage").innerHTML = head + `<tbody>${body}</tbody>` +
+    `<tfoot><tr><td colspan="${d.targets.length + 2}">
+      <small style="color:var(--dim)">
+        \u2713 offered &nbsp; \u2248 offered in another locale, which is fine
+        &nbsp; \u2717 not offered &nbsp; ? could not ask
+      </small></td></tr></tfoot>`;
+}
+
+/* -- 3. the bench ------------------------------------------------------ */
+let BENCH_TARGETS = [];
+let benchId = "";
+let benchTimer = null;
+let benchDrawnFor = "";
+
+function judge() {
+  return (localStorage.getItem("qc-who") || "").trim();
+}
+
+function pickBoxes(host, items) {
+  el(host).innerHTML = items.map((it) => `
+    <label class="pick ${it.off ? "off" : ""}" title="${esc(it.title || "")}">
+      <input type="checkbox" value="${esc(it.value)}"
+        ${it.on ? "checked" : ""} ${it.off ? "disabled" : ""}>
+      <span>${esc(it.text)}</span>
+      ${it.note ? `<small>${esc(it.note)}</small>` : ""}
+    </label>`).join("");
+  el(host).querySelectorAll("input").forEach((b) => { b.onchange = estimate; });
+}
+
+function ticked(host) {
+  return Array.from(el(host).querySelectorAll("input:checked")).map((b) => b.value);
+}
+
+function estimate() {
+  const n = ticked("bench-providers").length * ticked("bench-targets").length;
+  const secs = Number(el("bench-seconds").value) || 15;
+  const total = n * secs;
+  el("bench-estimate").innerHTML = n
+    ? `${n} entr${n === 1 ? "y" : "ies"} &times; ${secs}s = ` +
+      `<b>${(total / 60).toFixed(2)} minutes</b> of audio sent, and billed, ` +
+      `by whichever of these charges.`
+    : `Pick at least one model and one language.`;
+  el("go-bench").disabled = n === 0;
+}
+
+async function startBench() {
+  const status = el("bench-status");
+  el("go-bench").disabled = true;
+  status.className = "status";
+  status.textContent = "Capturing the clip\u2026";
+  try {
+    const r = await fetch(`/api/translate/${MODE}/bench`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        channel: el("bench-channel").value,
+        seconds: Number(el("bench-seconds").value) || 15,
+        providers: ticked("bench-providers"),
+        targets: ticked("bench-targets"),
+        label: el("bench-label").value,
+      }),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.detail || r.statusText);
+    benchId = body.id;
+    benchDrawnFor = "";
+    paintBench(body);
+    if (benchTimer) clearInterval(benchTimer);
+    benchTimer = setInterval(pollBench, 2000);
+  } catch (e) {
+    status.className = "status err";
+    status.textContent = String(e.message || e);
+    estimate();
+  }
+}
+
+async function pollBench() {
+  try {
+    const d = await get(`/api/translate/${MODE}/bench?id=${encodeURIComponent(benchId)}`);
+    if (d.bench) paintBench(d.bench); else endBench();
+  } catch (e) {
+    el("bench-status").className = "status err";
+    el("bench-status").textContent = "Cannot reach the server: " + (e.message || e);
+    endBench();
+  }
+}
+
+function endBench() {
+  if (benchTimer) { clearInterval(benchTimer); benchTimer = null; }
+  estimate();
+  loadCredits().catch(() => {});
+  loadScoreboard().catch(() => {});
+}
+
+function paintBench(b) {
+  const done = (b.entries || []).filter((e) => e.run || e.error).length;
+  const st = el("bench-status");
+  st.className = b.phase === "failed" ? "status err" : "status";
+  st.innerHTML =
+    `<span class="phase ${b.running ? "waiting pulse" : (b.phase === "failed" ? "broke" : "ended")}">` +
+    `${esc(b.phase)}</span> <span class="sub">${esc(b.channel)} &middot; ` +
+    `${done}/${b.count} entries &middot; ${esc(b.elapsed_s)}s</span>` +
+    (b.error ? `<br><span style="color:var(--bad)">${esc(b.error)}</span>` : "");
+  showBench(b);
+  if (!b.running) endBench();
+}
+
+/* Built once per bench, then patched. Re-rendering the whole thing on each
+   poll would reset every <audio> element and wipe a half-typed note. */
+function showBench(b) {
+  const base = `/api/translate/${MODE}/bench/${encodeURIComponent(b.id)}`;
+  if (benchDrawnFor !== b.id) {
+    benchDrawnFor = b.id;
+    el("listen").innerHTML = `
+      <div class="side" style="margin:0 0 6px">
+        <h4>The clip every model heard
+          <span class="lang">${esc(b.source_language)}</span></h4>
+        <audio controls preload="none" src="${base}/audio/source"></audio>
+        ${b.label ? `<p class="note">${esc(b.label)}</p>` : ""}
+      </div>`;
+    el("bench-view").innerHTML = `
+      <div class="entries" id="entries"></div>
+      <div class="form" style="margin-top:16px;align-items:center">
+        <div style="flex:0 1 180px">
+          <label for="judge">Scoring as</label>
+          <input id="judge" type="text" style="width:100%" placeholder="your name">
+        </div>
+        <button id="go-reveal">Reveal which was which</button>
+        <p class="note" id="reveal-note" style="margin:0"></p>
+      </div>`;
+    el("judge").value = judge();
+    el("judge").oninput = () => localStorage.setItem("qc-who", el("judge").value);
+    el("go-reveal").onclick = () => revealBench(b.id);
+  }
+
+  const best = Math.max(0, ...(b.entries || []).map((e) =>
+    (e.scores || []).reduce((a, s) => a + s.score, 0) / ((e.scores || []).length || 1)));
+  el("entries").innerHTML = (b.entries || []).map((e) => {
+    const scores = e.scores || [];
+    const mean = scores.length
+      ? scores.reduce((a, s) => a + s.score, 0) / scores.length : null;
+    const mine = scores.find((s) => s.who === judge());
+    const cand = e.candidate || {};
+    return `
+      <div class="entry ${b.revealed && mean !== null && mean === best && best > 0 ? "top" : ""}">
+        <h4><span class="tagline">${esc(e.label)}</span>
+            <span class="lang">${esc(e.target)}</span></h4>
+        ${e.has_audio
+          ? `<audio controls preload="none"
+               src="/api/translate/${MODE}/audio/${encodeURIComponent(e.run_id)}/spoken"></audio>`
+          : ""}
+        <blockquote class="${e.text ? "" : "empty"}">${
+          esc(e.text || e.error || (e.run ? "nothing came back" : "still running\u2026"))
+        }</blockquote>
+        ${e.run_id ? `
+          <div class="who" data-run="${esc(e.run_id)}">
+            ${[1, 2, 3, 4, 5].map((n) =>
+              `<button data-score="${n}" class="${mine && mine.score === n ? "mine" : ""}"
+                 title="${n} of 5">${n}</button>`).join("")}
+          </div>
+          <p class="said">${
+            scores.length
+              ? `mean <b>${mean.toFixed(1)}</b> from ${scores.length} &mdash; ` +
+                scores.map((x) => esc(x.who) + " " + x.score).join(", ")
+              : "not judged yet"
+          }</p>` : ""}
+        ${b.revealed && cand.provider
+          ? `<p class="reveal-name">${esc(cand.provider)}</p>` : ""}
+      </div>`;
+  }).join("");
+
+  el("entries").querySelectorAll(".who button").forEach((btn) => {
+    btn.onclick = () => score(b.id, btn.closest(".who").dataset.run,
+                              Number(btn.dataset.score));
+  });
+  el("reveal-note").textContent = b.revealed
+    ? "Revealed. The scores above were given blind."
+    : "Score everything first \u2014 this cannot be undone.";
+  el("go-reveal").disabled = b.revealed;
+}
+
+async function score(id, runId, value) {
+  const who = judge();
+  if (!who) {
+    el("reveal-note").textContent = "Put your name in first, so the bench has a record.";
+    el("judge").focus();
+    return;
+  }
+  try {
+    const r = await fetch(`/api/translate/${MODE}/bench/${encodeURIComponent(id)}/score`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ run_id: runId, who: who, score: value }),
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+    await pollBench();
+    await loadScoreboard();
+  } catch (e) {
+    el("reveal-note").textContent = String(e.message || e);
+  }
+}
+
+async function revealBench(id) {
+  try {
+    const r = await fetch(`/api/translate/${MODE}/bench/${encodeURIComponent(id)}/reveal`,
+                          { method: "POST" });
+    if (r.ok) paintBench(await r.json());
+    await loadScoreboard();
+  } catch (e) { /* the poll will catch up */ }
+}
+
+/* -- 5. the scoreboard ------------------------------------------------- */
+async function loadScoreboard() {
+  const d = await get(`/api/translate/${MODE}/scoreboard`);
+  const table = el("scoreboard");
+  if (!d.rows.length) {
+    table.innerHTML = `<tbody><tr><td><span class="sub">
+      Nothing judged yet. Run a comparison and score the entries.
+    </span></td></tr></tbody>`;
+    return;
+  }
+  table.innerHTML =
+    `<thead><tr><th>Model</th><th>Into</th><th>Score</th><th>Judged by</th>
+      <th>Worked</th><th>Took</th></tr></thead><tbody>` +
+    d.rows.map((r) => `
+      <tr>
+        <td><b>${esc(r.provider)}</b><br>
+            <small style="color:var(--dim)">${esc(r.model || "")}</small></td>
+        <td>${esc(r.target)}</td>
+        <td class="v">${r.mean_score == null
+          ? `<span style="color:var(--dim)">\u2014</span>`
+          : `<b style="color:var(--yellow)">${r.mean_score.toFixed(1)}</b>`}</td>
+        <td>${r.judgements || 0}</td>
+        <td class="${r.failed ? "v-no" : "v-yes"}">${r.ok || 0}/${r.runs || 0}</td>
+        <td>${esc(r.mean_s)}s</td>
+      </tr>`).join("") + `</tbody>`;
+}
+
 /* -- 4. listen ------------------------------------------------------- */
 function show(run) {
   const base = `/api/translate/${MODE}/audio/${encodeURIComponent(run.id)}`;
@@ -742,14 +1128,16 @@ async function loadHistory() {
 
 /* -- start ----------------------------------------------------------- */
 function tab(which) {
-  const live = which === "live";
-  el("tab-live").classList.toggle("on", live);
-  el("tab-clip").classList.toggle("on", !live);
-  el("pane-live").hidden = !live;
-  el("pane-clip").hidden = live;
+  for (const name of ["bench", "live", "clip"]) {
+    el("tab-" + name).classList.toggle("on", name === which);
+    el("pane-" + name).hidden = name !== which;
+  }
 }
+el("tab-bench").onclick = () => tab("bench");
 el("tab-live").onclick = () => tab("live");
 el("tab-clip").onclick = () => tab("clip");
+el("go-bench").onclick = startBench;
+el("bench-seconds").oninput = estimate;
 el("go-live").onclick = startLive;
 el("stop-live").onclick = stopLive;
 el("go").onclick = runOnce;
@@ -773,6 +1161,18 @@ async function adoptRunningSession() {
   try {
     await loadModes();
     await Promise.all([loadModel(), loadCredits(), loadChannels(), loadHistory()]);
+    const bench = await get(`/api/translate/${MODE}/bench`);
+    BENCH_TARGETS = bench.targets || [];
+    pickBoxes("bench-targets", BENCH_TARGETS.map((t) => ({
+      value: t, text: t, on: t !== "en-us",
+    })));
+    estimate();
+    await Promise.all([loadCoverage(), loadScoreboard()]);
+    if (bench.bench && bench.bench.running) {
+      benchId = bench.bench.id;
+      paintBench(bench.bench);
+      benchTimer = setInterval(pollBench, 2000);
+    }
     await adoptRunningSession();
   } catch (e) {
     el("live-status").className = "status err";

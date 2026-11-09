@@ -36,24 +36,30 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from commentary_qc.config import SourceConfig  # noqa: E402
-from commentary_qc.translate.audio import pcm16_bytes, wav_from_pcm16  # noqa: E402
-from commentary_qc.translate.live import (  # noqa: E402
+from commentary_qc.translate.core.models import AudioBlock, AudioSpec  # noqa: E402
+from commentary_qc.translate.core.ports import AudioSource  # noqa: E402
+from commentary_qc.translate.infra.audio_source import (  # noqa: E402
+    FFmpegAudioSource,
+)
+from commentary_qc.translate.infra.audio import pcm16_bytes, wav_from_pcm16  # noqa: E402
+from commentary_qc.translate.app.live import (  # noqa: E402
     AtCapacity,
     LiveRun,
     LiveRunner,
 )
-from commentary_qc.translate.mappers import realtime as rt  # noqa: E402
-from commentary_qc.translate.models import (  # noqa: E402
+from commentary_qc.translate.adapters.camb import protocol as rt  # noqa: E402
+from commentary_qc.translate.core.models import (  # noqa: E402
     NotConfigured,
     OutOfCredit,
     RateLimited,
     TranslateError,
     TranslationRun,
 )
-from commentary_qc.translate.modes import ModeRegistry  # noqa: E402
-from commentary_qc.translate.providers.camb import CambProvider  # noqa: E402
-from commentary_qc.translate.providers.mock_realtime import MockLiveSession  # noqa: E402
-from commentary_qc.translate.runs import RunStore  # noqa: E402
+from commentary_qc.translate.app.modes import ModeRegistry  # noqa: E402
+from commentary_qc.translate.adapters.camb.provider import CambProvider  # noqa: E402
+from commentary_qc.translate.adapters.mock.provider import MockProvider  # noqa: E402
+from commentary_qc.translate.adapters.mock.realtime import MockLiveSession  # noqa: E402
+from commentary_qc.translate.infra.runs import RunStore  # noqa: E402
 from commentary_qc.translate.settings import TranslateSettings  # noqa: E402
 
 PASS, FAIL = 0, 0
@@ -71,6 +77,19 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 
 def section(title: str) -> None:
     print(f"\n{title}\n" + "-" * len(title))
+
+
+def table_info(path, what: str = "table_info") -> set[str]:
+    """Column or index names, from a connection that is then closed.
+
+    Closing matters on Windows: an open SQLite handle keeps the file locked,
+    and the temporary directory then refuses to go away at the end of the run.
+    """
+    conn = sqlite3.connect(path)
+    try:
+        return {row[1] for row in conn.execute(f"PRAGMA {what}(translate_runs)")}
+    finally:
+        conn.close()
 
 
 def ffmpeg_bin() -> str:
@@ -627,6 +646,61 @@ def test_camb_live_adapter(url: str, fake: FakeRealtime) -> None:
 # ======================================================================
 # 3. The loop
 # ======================================================================
+def real_audio() -> FFmpegAudioSource:
+    """The production source: discovery plus an ffmpeg pull."""
+    return FFmpegAudioSource(SourceConfig(), ffmpeg_bin())
+
+
+class FakeAudio:
+    """An AudioSource made of arrays, so a live run needs no ffmpeg.
+
+    This is the point of the port. Before it, exercising the streaming loop
+    meant spawning a process and waiting for a real stream; now the loop can
+    be driven in milliseconds with audio chosen to provoke a particular case
+    -- including a mid-run gap, which is awkward to arrange for real.
+    """
+
+    def __init__(self, seconds: float = 6.0, gap_after: int = -1) -> None:
+        self.seconds = seconds
+        self.gap_after = gap_after
+        self.opened: list[tuple[str, int]] = []
+
+    def resolve(self, channel: str) -> str:
+        return f"fake://{channel}"
+
+    def open(self, channel: str, spec: AudioSpec, *, url: str = "") -> "FakeFeed":
+        self.opened.append((channel, spec.rate))
+        return FakeFeed(self, spec, url or self.resolve(channel))
+
+
+class FakeFeed:
+    def __init__(self, source: FakeAudio, spec: AudioSpec, url: str) -> None:
+        self.url = url
+        self._source = source
+        self._spec = spec
+        self._stopped = False
+
+    def blocks(self):
+        rng = np.random.default_rng(5)
+        per = max(1, self._spec.rate // 10)          # 100 ms
+        total = int(self._spec.rate * self._source.seconds)
+        sent = 0
+        index = 0
+        while sent < total and not self._stopped:
+            if index == self._source.gap_after:
+                yield AudioBlock(gap=True, reason="a pretend reconnect")
+                index += 1
+                continue
+            take = min(per, total - sent)
+            block = rng.normal(0, 0.2, take).astype(np.float32)
+            yield AudioBlock(samples=np.clip(block, -1, 1), wall=time.time())
+            sent += take
+            index += 1
+
+    def stop(self) -> None:
+        self._stopped = True
+
+
 def commentary_wav(path: Path, seconds: float = 12.0, rate: int = 48_000) -> Path:
     """Speech-shaped noise in bursts, so the gaps look like sentence ends."""
     t = np.arange(int(rate * seconds), dtype=np.float32) / rate
@@ -690,14 +764,14 @@ def test_live_run(tmp: Path) -> None:
 
     run = modes.get("shadow").live(
         modes.wire("shadow", "mock"), "football-41",
-        source=SourceConfig(), ffmpeg_bin=ffmpeg_bin(),
+        audio=real_audio(),
         target_language="en-us", seconds=12.0, url=str(media),
     )
     runner.start(run)
 
     second = modes.get("shadow").live(
         modes.wire("shadow", "mock"), "football-42",
-        source=SourceConfig(), ffmpeg_bin=ffmpeg_bin(), seconds=5.0,
+        audio=real_audio(), seconds=5.0,
         url=str(media),
     )
     try:
@@ -745,7 +819,7 @@ def test_live_run(tmp: Path) -> None:
     # -- stopping early
     run2 = modes.get("shadow").live(
         modes.wire("shadow", "mock"), "football-43",
-        source=SourceConfig(), ffmpeg_bin=ffmpeg_bin(),
+        audio=real_audio(),
         target_language="en-us", seconds=600.0, url=str(media),
     )
     runner.start(run2)
@@ -761,7 +835,7 @@ def test_live_run(tmp: Path) -> None:
     # -- a dead channel
     dead = modes.get("shadow").live(
         modes.wire("shadow", "mock"), "football-41",
-        source=SourceConfig(), ffmpeg_bin=ffmpeg_bin(),
+        audio=real_audio(),
         target_language="en-us", seconds=10.0,
         url=str(tmp / "there-is-no-such-file.wav"),
     )
@@ -779,7 +853,7 @@ def test_live_run(tmp: Path) -> None:
     tight_modes = ModeRegistry(tight)
     capped = tight_modes.get("shadow").live(
         tight_modes.wire("shadow", "mock"), "football-44",
-        source=SourceConfig(), ffmpeg_bin=ffmpeg_bin(),
+        audio=real_audio(),
         target_language="en-us", seconds=600.0, url=str(media),
     )
     LiveRunner(None).start(capped)
@@ -791,7 +865,19 @@ def test_live_run(tmp: Path) -> None:
 
 
 def test_live_language_warning(tmp: Path) -> None:
-    section("a language the docs do not list is flagged, not silently tried")
+    section("the provider decides what to warn about, and the run repeats it")
+
+    # The caveat belongs to the vendor, not to the app. Camb publishes 14
+    # realtime languages and Italian is not among them, so it is Camb's
+    # adapter that must say so -- and the app must not know why.
+    camb = CambProvider(TranslateSettings(provider="camb", camb_api_key="k"))
+    check("Camb's adapter warns about Italian, which its realtime list omits",
+          "it-it" in camb.live_note("it-it"), camb.live_note("it-it"))
+    check("and says nothing about German, which it carries",
+          camb.live_note("de-de") == "", camb.live_note("de-de"))
+    check("the app holds no vendor language list of its own: a provider that "
+          "supports a language simply does not warn",
+          MockProvider(TranslateSettings()).live_note("it-it") == "")
 
     if not have_ffmpeg():
         check("ffmpeg is available (set FFMPEG_BIN)", False, "skipping")
@@ -804,17 +890,45 @@ def test_live_language_warning(tmp: Path) -> None:
     modes = ModeRegistry(settings)
     run = modes.get("shadow").live(
         modes.wire("shadow", "mock"), "football-21",
-        source=SourceConfig(), ffmpeg_bin=ffmpeg_bin(),
-        target_language="it-it", seconds=6.0, url=str(media),
+        audio=real_audio(),
+        target_language="zz-zz", seconds=6.0, url=str(media),
     )
     LiveRunner(None).start(run)
     run.wait(60)
     snap = run.snapshot()
-    check("the run warns that Italian is not in the published realtime list",
-          "it-it" in snap["language_warning"], snap["language_warning"])
-    check("but it was attempted anyway, because the docs are known to be "
-          "incomplete and refusing would be guessing",
+    check("a run surfaces whatever warning its provider gave",
+          "zz-zz" in snap["language_warning"], snap["language_warning"])
+    check("but it was attempted anyway, because a published language list is "
+          "sometimes incomplete and refusing would be guessing",
           snap["phase"] == "done", snap["error"])
+
+
+def test_live_run_without_ffmpeg(tmp: Path) -> None:
+    section("a live run against a fake source, with no ffmpeg at all")
+
+    settings = TranslateSettings(
+        provider="mock", live_seconds=6.0,
+        shadow_daily_minutes=10.0, shadow_per_channel_minutes=10.0,
+    )
+    modes = ModeRegistry(settings)
+    fake = FakeAudio(seconds=6.0, gap_after=20)
+    run = modes.get("shadow").live(
+        modes.wire("shadow", "mock"), "football-41",
+        audio=fake, target_language="en-us", seconds=6.0,
+    )
+    LiveRunner(None).start(run)
+    check("it finishes", run.wait(40))
+    snap = run.snapshot()
+    check("and it worked, with no process spawned anywhere",
+          snap["phase"] == "done", snap["error"])
+    check("the source was asked for the rate the SESSION wanted, not a rate "
+          "the app chose", fake.opened and fake.opened[0][1] == rt.WIRE_RATE,
+          str(fake.opened))
+    check("discovery went through the port too", snap["url"].startswith("fake://"))
+    check("a gap mid-run is recorded rather than smoothed over",
+          any("reconnect" in note for note in snap["notes"]), str(snap["notes"]))
+    check("and the run carried on afterwards", snap["sent_seconds"] > 3.0,
+          str(snap["sent_seconds"]))
 
 
 def test_run_store_migration(tmp: Path) -> None:
@@ -843,10 +957,7 @@ def test_run_store_migration(tmp: Path) -> None:
     check("opening it adds the missing column rather than failing every "
           "insert -- CREATE TABLE IF NOT EXISTS does nothing to a table that "
           "already exists",
-          "kind" in {
-              r[1] for r in sqlite3.connect(path)
-              .execute("PRAGMA table_info(translate_runs)")
-          })
+          "kind" in table_info(path))
     store.put(TranslationRun(id="new-1", created=2000.0, mode="shadow",
                              kind="live", channel="football-41"))
     rows = store.recent(limit=5)
@@ -892,13 +1003,14 @@ def main() -> int:
     url = fake.start()
     print(f"fake Camb realtime on {url}")
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         tmp = Path(tmpdir)
         try:
             test_realtime_mapper()
             test_audio_helpers()
             test_mock_live_session()
             test_camb_live_adapter(url, fake)
+            test_live_run_without_ffmpeg(tmp)
             test_run_store_migration(tmp)
             test_live_run(tmp)
             test_live_language_warning(tmp)

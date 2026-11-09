@@ -39,17 +39,17 @@ from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
-from .config import Settings
-from .fixtures import FixtureFeed
-from .registry import Registry, default_channels
-from .report import build as build_report
-from .scanner import LiveScanner, describe
-from .store import EventStore
-from .translate import api as translate_api
-from .translate import control as translate_control
-from .translate.modes import ModeRegistry
-from .translate.runs import RunStore
-from .translate.settings import TranslateSettings
+from commentary_qc.config import Settings
+from commentary_qc.fixtures import FixtureFeed
+from commentary_qc.registry import Registry, default_channels
+from commentary_qc.report import build as build_report
+from commentary_qc.scanner import LiveScanner, describe
+from commentary_qc.store import EventStore
+from commentary_qc.translate.web import api as translate_api
+from commentary_qc.translate.app import control as translate_control
+from commentary_qc.translate.app.modes import ModeRegistry
+from commentary_qc.translate.infra.runs import RunStore
+from commentary_qc.translate.settings import TranslateSettings
 
 log = logging.getLogger(__name__)
 

@@ -21,7 +21,7 @@ from __future__ import annotations
 import statistics
 import time
 
-from .config import WINDOW_SECONDS, Thresholds
+from commentary_qc.config import WINDOW_SECONDS, Thresholds
 
 _METRIC_SQL = (
     "SELECT wall, lufs_minute, lufs_short, true_peak_dbtp, clip_run, speech_ratio,"

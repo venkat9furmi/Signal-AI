@@ -20,7 +20,7 @@ class Mode:
     built, what it may spend, where the result is kept and who is allowed to
     see it. The endpoints are namespaced by it -- ``/api/translate/shadow/run``
     -- so calling one is choosing the wiring rather than passing a flag that
-    something downstream might ignore. :mod:`commentary_qc.translate.modes`
+    something downstream might ignore. :mod:`commentary_qc.translate.app.modes`
     holds the implementations.
 
     ``off``

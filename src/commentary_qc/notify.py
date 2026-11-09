@@ -21,7 +21,7 @@ import time
 import urllib.error
 import urllib.request
 
-from .registry import Channel
+from commentary_qc.registry import Channel
 
 log = logging.getLogger(__name__)
 

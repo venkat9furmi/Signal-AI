@@ -17,7 +17,7 @@ from typing import Protocol
 
 import numpy as np
 
-from .config import VAD_CHUNK_16K, VAD_RATE
+from commentary_qc.config import VAD_CHUNK_16K, VAD_RATE
 
 
 class VadBackend(Protocol):

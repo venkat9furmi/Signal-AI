@@ -26,7 +26,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from .translate.store import SCHEMA as _TRANSLATE_SCHEMA
+from commentary_qc.translate.infra.captions import SCHEMA as _TRANSLATE_SCHEMA
 
 log = logging.getLogger(__name__)
 

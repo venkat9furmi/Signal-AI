@@ -28,7 +28,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .config import ANALYSIS_RATE, SourceConfig
+from commentary_qc.config import ANALYSIS_RATE, SourceConfig
 
 log = logging.getLogger(__name__)
 

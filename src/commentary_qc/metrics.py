@@ -17,7 +17,7 @@ from typing import Iterator
 import numpy as np
 from scipy import signal
 
-from .config import (
+from commentary_qc.config import (
     ANALYSIS_RATE,
     DECIM,
     VAD_CHUNK_16K,
@@ -25,14 +25,14 @@ from .config import (
     WINDOW_SECONDS,
     AnalyzerConfig,
 )
-from .loudness import (
+from commentary_qc.loudness import (
     KWeighting,
     TruePeakMeter,
     loudness_from_ms,
     longest_clip_run,
     power_to_db,
 )
-from .vad import make_vad
+from commentary_qc.vad import make_vad
 
 
 @dataclass(slots=True)

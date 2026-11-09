@@ -19,13 +19,13 @@ import threading
 import time
 import uuid
 
-from .audio_source import FFmpegSource
-from .config import Settings, Thresholds
-from .engine import AlertEngine
-from .metrics import WindowAnalyzer
-from .registry import Channel, ChannelStatus, Registry
-from .scanner import describe
-from .store import EventStore, read_open_claims
+from commentary_qc.audio_source import FFmpegSource
+from commentary_qc.config import Settings, Thresholds
+from commentary_qc.engine import AlertEngine
+from commentary_qc.metrics import WindowAnalyzer
+from commentary_qc.registry import Channel, ChannelStatus, Registry
+from commentary_qc.scanner import describe
+from commentary_qc.store import EventStore, read_open_claims
 
 log = logging.getLogger(__name__)
 
