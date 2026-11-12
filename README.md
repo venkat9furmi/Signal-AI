@@ -64,10 +64,94 @@ docker compose up -d --build
 
 Then open <http://127.0.0.1:8642> and pick one.
 
-**New here?** Read [ARCHITECTURE.md](ARCHITECTURE.md) — it explains how the
-whole thing is put together, walks a piece of audio through every flow, names
-the technical debt honestly, and ends with the to-do list. This file is the
-shorter operator's guide.
+
+---
+
+## If you are picking this up
+
+Read in this order. It is about two hours to the point where you could fix a
+bug, and a day to the point where you could change a threshold and defend it.
+
+**First, make it run.** Nothing below makes much sense until you have seen it
+working.
+
+```
+docker compose up -d --build
+docker compose logs -f recorder      # watch it find channels and measure them
+```
+
+Then <http://127.0.0.1:8642>. Leave it running while you read.
+
+### The ninety-minute path
+
+| # | File | Lines | Why |
+|---|---|---|---|
+| 1 | [ARCHITECTURE.md](ARCHITECTURE.md) | 734 | The whole system, a piece of audio walked through every flow, the debt named honestly, and the to-do list. Read §1–§4 now and the rest later. |
+| 2 | `src/commentary_qc/config.py` | 392 | **Read this slowly.** Every threshold, and beside each one the measurement it came from. It is the closest thing to a specification. |
+| 3 | `src/commentary_qc/engine.py` | 552 | The rules and the hysteresis. Readable in one sitting, and it is the heart of the QC half. |
+| 4 | `src/commentary_qc/metrics.py` | 377 | Where a block of audio becomes numbers. The voice/crowd split lives in `_analyze` and is about twenty lines. |
+| 5 | `src/commentary_qc/loudness.py` | 117 | Short, and the comments explain why it is not a library call. |
+| 6 | `tests/test_engine.py` | — | Run it. Each test names a real incident; they are the fastest description of what the system actually promises. |
+
+### Then, when you need them
+
+| File | Lines | When |
+|---|---|---|
+| `supervisor.py` | 575 | One thread per channel. Read when something is restarting oddly. |
+| `audio_source.py` | 214 | ffmpeg and reconnects. Read when a stream behaves badly. |
+| `discovery.py` | 134 | How a channel name becomes a URL, without a login. |
+| `store.py` | 445 | SQLite, one writer. Read before you add a column. |
+| `notify.py` | 216 | Slack, one thread per broadcast. Delivery is claimed-only. |
+| `web.py` | 700 | The page and its API. Does too much — see ARCHITECTURE §9. |
+| `vad.py` | 143 | Short, and it documents a trap that cost real debugging time. |
+
+### The translation half
+
+Skip it entirely until you need it — it is independent, and nothing it does is
+published. When you do:
+
+1. `translate/core/ports.py` — the contract a model has to meet
+2. `translate/adapters/mock/` — the whole architecture in one short adapter
+3. `translate/app/group.py` — one channel into several languages at once
+4. `tests/test_architecture.py` — the dependency rule, enforced
+
+### Before you change anything
+
+- **`thresholds.json`** — how to retune without touching code. Read its
+  `_readme`.
+- **`CLAUDE.md`** (1,167 lines) — not a document to read front to back. It is
+  the project diary: every decision, why it was made, and what it cost when it
+  was made wrong. **Search it** when you want to know why something is the way
+  it is. The answer is almost always in there, with a date.
+- **`ARCHITECTURE.md` §7** — "Rules that are not obvious". Four of them will
+  save you an afternoon each.
+- **`ARCHITECTURE.md` §9 and §10** — what to improve, ranked, and the to-do
+  list.
+
+### Three things that will catch you out
+
+1. **Never put the SQLite databases on a host bind mount.** WAL needs shared
+   memory a Windows mount cannot provide: the recorder writes perfectly while
+   readers see a stale file and the page reports an outage that is not
+   happening. They live on a named volume.
+2. **Git Bash rewrites `/data/...`** into a Windows path. Prefix any
+   `docker compose exec ... /data/...` with `MSYS_NO_PATHCONV=1`, or use
+   PowerShell.
+3. **A typo in `thresholds.json` stops the recorder** rather than being
+   ignored, and it will crash-loop. That is deliberate — a silently dropped
+   threshold is an outage nobody can see. `docker compose logs --tail 20
+   recorder` will say `unknown Thresholds keys`.
+
+### Run the tests
+
+```
+python tests/test_engine.py            # the rules and their hysteresis
+python tests/test_dsp.py               # loudness, true peak, VAD
+python tests/test_no_commentary.py     # the filler rule, against labelled nights
+```
+
+The full list is under [Tests](#tests). They pass, they need no API key, and
+every vendor is tested against a fake of itself on localhost.
 
 ---
 
