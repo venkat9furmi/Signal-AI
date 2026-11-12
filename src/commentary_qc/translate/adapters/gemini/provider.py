@@ -91,6 +91,9 @@ class GeminiLiveSession:
         self._lock = threading.Lock()
         self._failure: TranslateError | None = None
         self._close_note = ""
+        #: Set when the socket closed naming a reason, already classified, so
+        #: a startup close is reported as the thing it was.
+        self._close_reason: TranslateError | None = None
         self._sent_bytes = 0
         self._recv_bytes = 0
         self.session_id = ""
@@ -114,9 +117,22 @@ class GeminiLiveSession:
             self._ws.send(json.dumps(hello))
         except Exception as exc:  # noqa: BLE001
             self._shut()
-            raise TranslateError(
-                f"the session refused the setup message: {_safe(exc)}"
-            ) from exc
+            # A key or quota refusal closes the socket fast enough to beat
+            # this send, and the close frame says which it was. Classify it
+            # the same way the reader thread would have, so the caller is told
+            # the same thing either way -- see `_closed_early`.
+            code, _ = _close_parts(exc)
+            fallback: TranslateError = (
+                # It closed, but said nothing about why. Mute refusals are
+                # what this endpoint does for some key and model problems, so
+                # say the same thing the reader thread would have said.
+                _mute_close(self.model, _closed_note(exc))
+                if code is not None
+                else TranslateError(
+                    f"the session refused the setup message: {_safe(exc)}"
+                )
+            )
+            raise (_closed_early(exc) or fallback) from exc
 
         self._reader = threading.Thread(
             target=self._read_forever,
@@ -147,6 +163,7 @@ class GeminiLiveSession:
                 self._offer(event)
         except Exception as exc:  # noqa: BLE001 - a closed socket arrives as one
             self._close_note = _closed_note(exc)
+            self._close_reason = _closed_early(exc)
         finally:
             self._done.set()
             self._ready.set()
@@ -169,14 +186,12 @@ class GeminiLiveSession:
         self._raise_if_failed()
         if self._done.is_set():
             if not self.resolved:
-                raise NotConfigured(
-                    "the session closed before it was ready and gave no "
-                    "reason. That is what this endpoint does when the key is "
-                    "refused or the model is not enabled for the project, so "
-                    "check GEMINI_API_KEY and that "
-                    f"{self.model} is available to it."
-                    + (f" ({self._close_note})" if self._close_note else "")
-                )
+                # A close that named a reason is classified by it: a quota
+                # close must still latch the budget shut rather than read as
+                # a configuration problem.
+                if self._close_reason is not None:
+                    raise self._close_reason
+                raise _mute_close(self.model, self._close_note)
             raise TranslateError(
                 self._close_note or "the session closed before it was ready"
             )
@@ -480,18 +495,73 @@ def _opening_failed(exc: Exception) -> TranslateError:
     return TranslateError(f"could not open the live session: {_safe(exc)}")
 
 
-def _closed_note(exc: Exception) -> str:
+def _close_parts(exc: Exception) -> tuple[int | None, str]:
+    """The close code and reason out of whichever shape the library used.
+
+    A closed socket arrives as an exception that may carry the frame directly
+    or hold it in ``rcvd``/``sent``, depending on which side closed first.
+    Both are read because which one it is depends on timing we do not control.
+    """
     code = getattr(exc, "code", None)
     reason = (getattr(exc, "reason", "") or "").strip()
     if code is None:
-        rcvd = getattr(exc, "rcvd", None)
-        code = getattr(rcvd, "code", None)
-        reason = reason or (getattr(rcvd, "reason", "") or "").strip()
+        for attr in ("rcvd", "sent"):
+            frame = getattr(exc, attr, None)
+            if frame is not None and getattr(frame, "code", None) is not None:
+                code = frame.code
+                reason = reason or (getattr(frame, "reason", "") or "").strip()
+                break
+    return (int(code) if code is not None else None), reason
+
+
+def _closed_note(exc: Exception) -> str:
+    code, reason = _close_parts(exc)
     if code is None:
         return f"the session ended: {_safe(exc)}"
-    if int(code) == 1000:
+    if code == 1000:
         return reason or "the session ended normally"
     return reason or f"the session closed with code {code}"
+
+
+def _mute_close(model: str, note: str = "") -> NotConfigured:
+    """What a close that gave no reason most likely means.
+
+    Said from one place because a startup close reaches two paths -- the
+    reader thread and the setup send -- and the same cause telling a person
+    two different stories is its own bug.
+    """
+    return NotConfigured(
+        "the session closed before it was ready and gave no reason. That is "
+        "what this endpoint does when the key is refused or the model is not "
+        f"enabled for the project, so check GEMINI_API_KEY and that {model} "
+        "is available to it."
+        + (f" ({note})" if note else "")
+    )
+
+
+def _closed_early(exc: Exception) -> TranslateError | None:
+    """The exception a close *during startup* means, or ``None`` if it is mute.
+
+    This exists because of a race with real consequences. A refused key or an
+    exhausted quota makes the endpoint close almost immediately, and our setup
+    message is sent almost immediately -- so whether the close lands before or
+    after that send is pure timing. The after case is classified by the reader
+    thread through :func:`protocol.error_for` and says "check GEMINI_API_KEY";
+    the before case used to raise a bare :class:`TranslateError` and throw the
+    reason away, although the close frame says ``UNAUTHENTICATED`` in so many
+    words.
+
+    It mattered most for quota, not for keys: :class:`OutOfCredit` is the type
+    that latches the budget shut, so losing it meant a project with no quota
+    left would keep retrying instead of stopping.
+
+    Both paths now go through the same classifier. ``None`` means the close
+    carried no reason to classify, and the caller's own message is better.
+    """
+    _, reason = _close_parts(exc)
+    if not reason:
+        return None
+    return gp.error_for(reason, _closed_note(exc))
 
 
 __all__ = ["GeminiLiveSession", "GeminiProvider", "MAX_FRAME", "EVENT_QUEUE"]

@@ -40,8 +40,14 @@ from commentary_qc.translate.app import bench as bench_mod
 from commentary_qc.translate.app.bench import MMC_TARGETS
 from commentary_qc.translate.infra.audio import to_wav
 from commentary_qc.translate.infra.audio_source import FFmpegAudioSource
+from commentary_qc.translate.app.group import TooManyTargets
 from commentary_qc.translate.app.live import AtCapacity, LiveRunner
 from commentary_qc.translate.core.channels import clean_channel
+from commentary_qc.translate.core.identify import (
+    FixtureRef,
+    identify_language,
+    identify_match,
+)
 from commentary_qc.translate.core.languages import tag_for_channel
 from commentary_qc.translate.core.models import ModeNotBuilt, NoAudio, NotConfigured, TranslateError
 from commentary_qc.translate.app.modes import ModeRegistry
@@ -71,6 +77,29 @@ class LiveIn(BaseModel):
         description="Hard limit on the session, in seconds.",
     )
     target: str = ""
+    provider: str = ""
+    source_language: str = "auto"
+    live_mode: str = Field(default="", description="fast or slow")
+
+
+class LiveGroupIn(BaseModel):
+    """Translate one channel into several languages at once.
+
+    ``targets`` is the only difference from :class:`LiveIn`, and it is the
+    whole feature: one commentator, one audio pull, one metered session per
+    language. The cap lives in settings rather than here, because it is about
+    what the account can afford and not about what the request may ask for.
+    """
+
+    channel: str = Field(default="", description="Channel to translate, e.g. football-41")
+    targets: list[str] = Field(
+        default_factory=list,
+        description="Output languages, as tags. One session each.",
+    )
+    seconds: float | None = Field(
+        default=None, ge=10.0, le=1800.0,
+        description="Hard limit on each session, in seconds.",
+    )
     provider: str = ""
     source_language: str = "auto"
     live_mode: str = Field(default="", description="fast or slow")
@@ -124,11 +153,25 @@ def build_router(
     source: SourceConfig | None = None,
     ffmpeg_bin: str = "ffmpeg",
     audio_source: Any = None,
+    fixtures: Any = None,
+    qc_snapshot: Any = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/translate", tags=["translate"])
     # One audio source, built here and handed to every use case. The app layer
     # never learns that audio arrives over HLS through ffmpeg.
-    audio = audio_source or FFmpegAudioSource(source or SourceConfig(), ffmpeg_bin)
+    #
+    # Named `audio_src`, not `audio`, and that is not a style choice. Every
+    # route handler below is defined in *this* function's scope, so a handler
+    # called `def audio(...)` rebinds this very name -- and the handlers read
+    # it when a request arrives, long after the rebinding. That is exactly
+    # what happened: a route named `audio` left all three paths that need
+    # audio (a clip run, a live session, the bench) raising
+    # "'function' object has no attribute 'resolve'", because they were
+    # handed the route function. Keep dependency names distinct from
+    # handler names.
+    audio_src = audio_source or FFmpegAudioSource(
+        source or SourceConfig(), ffmpeg_bin
+    )
 
     def channel_tag(channel: str) -> str:
         """The language a channel is configured to carry, as a tag.
@@ -274,26 +317,89 @@ def build_router(
         })
 
     # -- what you can run it on -------------------------------------------
+    def qc_rows() -> dict[str, dict]:
+        """What the quality engine already knows about each channel.
+
+        Read, not probed. The quality side of this system is scanning every
+        channel continuously in the same process, so liveness and the current
+        verdict are a dictionary lookup -- there is no reason for the
+        translate page to probe 52 channels itself and no reason for it to
+        offer a channel that is off air.
+        """
+        if qc_snapshot is None:
+            return {}
+        try:
+            snap = qc_snapshot()
+        except Exception:  # noqa: BLE001 - a picker must still render
+            log.debug("could not read the QC snapshot for the channel list")
+            return {}
+        return {row["channel"]: row for row in snap.get("channels", [])}
+
     @router.get("/{mode}/channels")
     def channels(mode: str) -> JSONResponse:
-        """Channels that can be listened to right now.
+        """Channels to listen to, live ones first, with what they sound like.
 
-        Liveness is not asked for here. Probing 52 channels takes a couple of
-        seconds, and a shadow run already reports "this channel is not live"
-        in a way the page can show -- so the picker lists everything and the
-        run tells you if you chose one that is off air.
+        A bad source makes a good model look bad, and that is the reason this
+        carries the quality verdict rather than just a list of names. This
+        platform's live commentary sits five to seven dB under the streaming
+        target; translate a channel that is also on the vendor's holding clip
+        and you are judging the model on audio no model could do much with --
+        without being told that is what happened.
         """
         mode_or_501(mode)
+        qc = qc_rows()
         rows = []
-        for name, channel in sorted((getattr(registry, "channels", {}) or {}).items()):
-            language = getattr(channel, "language", "") or ""
+        configured = dict(sorted((getattr(registry, "channels", {}) or {}).items()))
+        # Channels the quality side has found broadcasting but that are not in
+        # channels.json are included: a claimed channel is monitored whether
+        # or not it is configured, and it is a perfectly good thing to listen
+        # to.
+        extra = {
+            name: row for name, row in qc.items()
+            if name not in configured and row.get("broadcasting")
+        }
+        for name in list(configured) + sorted(extra):
+            channel = configured.get(name)
+            row = qc.get(name) or {}
+            language = (
+                getattr(channel, "language", "") if channel is not None
+                else row.get("language", "")
+            ) or ""
+            claim = row.get("claim") or {}
+            match = claim.get("match") or {}
             rows.append({
                 "channel": name,
-                "label": getattr(channel, "label", name),
+                "label": (
+                    getattr(channel, "label", name) if channel is not None
+                    else row.get("label", name)
+                ),
+                "short": row.get("short", name),
                 "language": language,
                 "tag": tag_for_channel(language),
+                "configured": channel is not None,
+                # Everything below comes from the quality engine and is absent
+                # rather than guessed when it has nothing to say.
+                "live": bool(row.get("broadcasting")),
+                "state": row.get("state", ""),
+                "state_label": row.get("state_label", ""),
+                "fault": row.get("fault") or "",
+                "lufs": (row.get("metric") or {}).get("lufs"),
+                "claimed_by": claim.get("commentator") or "",
+                "match": match.get("name") or "",
             })
-        return JSONResponse({"channels": rows, "count": len(rows)})
+        # Live first, then the configured list in its own order. A picker
+        # whose top entry is off air invites the one mistake this endpoint
+        # exists to prevent.
+        order = {"commentary": 0, "live": 0, "filler": 1}
+        rows.sort(key=lambda r: (
+            not r["live"], order.get(r["state"], 2), r["channel"]
+        ))
+        return JSONResponse({
+            "channels": rows,
+            "count": len(rows),
+            "live": sum(1 for r in rows if r["live"]),
+            "qc": bool(qc),
+        })
 
     # -- run it ------------------------------------------------------------
     @router.post("/{mode}/run")
@@ -316,7 +422,7 @@ def build_router(
             captured = grab_audio(
                 channel,
                 seconds,
-                audio,
+                audio_src,
                 timeout_s=wiring.settings.grab_timeout_s,
             )
         except ProbeFailed as exc:
@@ -393,7 +499,7 @@ def build_router(
             run = modes.get(mode).live(
                 wiring,
                 channel,
-                audio=audio,
+                audio=audio_src,
                 source_language=body.source_language or "auto",
                 target_language=body.target,
                 live_mode=body.live_mode,
@@ -412,6 +518,167 @@ def build_router(
             raise HTTPException(409, str(exc)) from exc
         return JSONResponse(run.snapshot(), status_code=202)
 
+    def identity_of(run: Any) -> dict | None:
+        """Which language and which match a single live run is carrying.
+
+        A :class:`LiveGroup` works this out for itself because it owns the
+        fixture list; a lone run does not, so the same thing is assembled
+        here from the one transcript it has. Returns ``None`` rather than an
+        empty verdict when there is no run, so the page can tell "nothing is
+        running" from "running, nothing recognised yet".
+        """
+        if run is None:
+            return None
+        heard = run.heard_text()
+        language = identify_language(heard)
+        configured = channel_tag(run.channel)
+        if configured in ("auto", "unknown"):
+            # Not a claim about the channel, so not shown as one. See
+            # LanguageGuess.agrees_with.
+            configured = ""
+        mismatch = bool(configured) and not language.agrees_with(configured)
+        out: dict[str, Any] = {
+            "heard_words": len(heard.split()),
+            "language": language.to_dict(),
+            "configured": configured,
+            "match": identify_match(heard, fixture_refs()).to_dict(),
+            "language_matches": not mismatch,
+        }
+        if mismatch:
+            out["warning"] = (
+                f"this channel is listed as {configured} but the commentary "
+                f"sounds like {language.name}"
+            )
+        return out
+
+    def fixture_refs() -> list[FixtureRef]:
+        """Today's fixtures as plain values the domain can match against."""
+        if fixtures is None:
+            return []
+        try:
+            rows = fixtures.matches()
+        except Exception:  # noqa: BLE001 - the feed is allowed to be down
+            log.debug("could not read fixtures for the match guess")
+            return []
+        out = []
+        for match in rows or []:
+            home = getattr(match, "home", "")
+            away = getattr(match, "away", "")
+            if not home or not away:
+                continue
+            out.append(FixtureRef(
+                id=str(getattr(match, "id", "")),
+                home=str(home),
+                away=str(away),
+                competition=str(getattr(match, "competition", "") or ""),
+                state=str(getattr(match, "phase", "") or ""),
+            ))
+        return out
+
+    # -- one channel, several languages ----------------------------------
+    @router.post("/{mode}/live/group")
+    def live_group_start(mode: str, body: LiveGroupIn) -> JSONResponse:
+        """Translate one channel into several languages at once.
+
+        The product shape rather than the research one: one commentator, one
+        ffmpeg pull, and a model session per output language, all started
+        together so what comes back is comparable. The audio is fanned out
+        inside the process, so three languages are three sessions on the
+        vendor and one request on theirs.
+        """
+        info = mode_or_501(mode).info
+        if not info.live:
+            raise HTTPException(
+                501, f"{info.name} mode has no live path" + (
+                    f": {info.pending}" if info.pending else ""
+                )
+            )
+        try:
+            channel = clean_channel(body.channel)
+        except NotConfigured as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+        mode_obj = modes.get(mode)
+        if not hasattr(mode_obj, "live_group"):
+            raise HTTPException(
+                501, f"{info.name} mode translates one language at a time"
+            )
+        wiring = wire_or_501(mode, body.provider)
+        if not hasattr(wiring.provider, "open_live"):
+            name = wiring.provider.name
+            wiring.close()
+            raise HTTPException(
+                400,
+                f"{name} offers no live translation, only the clip path. "
+                f"Switch the model to one that does.",
+            )
+        try:
+            group = mode_obj.live_group(
+                wiring,
+                channel,
+                list(body.targets),
+                audio=audio_src,
+                source_language=body.source_language or "auto",
+                live_mode=body.live_mode,
+                seconds=body.seconds or 0.0,
+                fixtures=fixtures,
+                configured_language=channel_tag(channel),
+            )
+        except TooManyTargets as exc:
+            wiring.close()
+            # 409 rather than 400: the request is well formed and will work
+            # with one language fewer, which is a different thing from wrong.
+            raise HTTPException(409, str(exc)) from exc
+        except (NotConfigured, TranslateError) as exc:
+            wiring.close()
+            raise HTTPException(400, str(exc)) from exc
+
+        try:
+            live_runs.start_group(group)
+        except AtCapacity as exc:
+            wiring.close()
+            raise HTTPException(409, str(exc)) from exc
+        except TranslateError as exc:
+            wiring.close()
+            raise HTTPException(400, str(exc)) from exc
+        return JSONResponse(group.snapshot(), status_code=202)
+
+    @router.get("/{mode}/live/group")
+    def live_group_state(
+        mode: str, id: str = "", provider: str = ""
+    ) -> JSONResponse:
+        """The current group, or the one named by ``id``.
+
+        ``provider`` steers only the language list and the mode list, never
+        the group that is running: those lists are what the page needs to
+        offer the next run, and they belong to whichever model is selected.
+        """
+        info = mode_or_501(mode).info
+        group = live_runs.group(id) if id else live_runs.current_group()
+        return JSONResponse({
+            "mode": info.to_dict(),
+            "group": group.snapshot() if group is not None else None,
+            "history": [g.summary() for g in live_runs.groups()],
+            "limits": {
+                "seconds": settings.live_seconds,
+                "targets": settings.live_targets_max,
+                "channels": settings.live_concurrent,
+                "modes": _live_modes(mode, provider),
+                "default_mode": settings.live_mode,
+            },
+            "languages": _live_languages(mode, provider),
+        })
+
+    @router.post("/{mode}/live/group/{group_id}/stop")
+    def live_group_stop(mode: str, group_id: str) -> JSONResponse:
+        """Stop every language at once. Each leg still collects its tail."""
+        mode_or_501(mode)
+        group = live_runs.group(group_id)
+        if group is None:
+            raise HTTPException(404, f"no live group {group_id}")
+        group.stop("stopped from the page")
+        return JSONResponse(group.snapshot())
+
     @router.get("/{mode}/live")
     def live_state(mode: str, id: str = "") -> JSONResponse:
         """The current session, or the one named by ``id``.
@@ -426,6 +693,11 @@ def build_router(
         return JSONResponse({
             "mode": info.to_dict(),
             "live": run.snapshot() if run is not None else None,
+            # The same two questions a group answers, for a single language.
+            # Computed here rather than in the run because it needs the
+            # fixture list, which is a thing the process has and a live run
+            # has no business knowing about.
+            "identity": identity_of(run),
             "history": [
                 {
                     "id": r.id,
@@ -493,10 +765,17 @@ def build_router(
             },
         )
 
-    def _live_languages(mode: str) -> dict[str, Any]:
-        """What the live path accepts, and the caveat that goes with it."""
+    def _live_languages(mode: str, provider: str = "") -> dict[str, Any]:
+        """What the live path accepts, and the caveat that goes with it.
+
+        Asked of the provider the page has actually chosen, not of the default
+        one. The lists differ -- one vendor's realtime socket carries fourteen
+        languages and another's carries seventy-nine -- so a page that showed
+        the default's list beside a selected model would offer a language that
+        is only refused once a match has started.
+        """
         try:
-            wiring = wire_or_501(mode)
+            wiring = wire_or_501(mode, provider)
         except HTTPException:
             return {"tags": [], "note": ""}
         note = ""
@@ -521,10 +800,10 @@ def build_router(
             ],
         }
 
-    def _live_modes(mode: str) -> list[dict]:
+    def _live_modes(mode: str, provider: str = "") -> list[dict]:
         """The modes the chosen provider offers, in its own words."""
         try:
-            wiring = wire_or_501(mode)
+            wiring = wire_or_501(mode, provider)
         except HTTPException:
             return []
         try:
@@ -620,7 +899,7 @@ def build_router(
 
         def work(bench) -> None:
             captured = grab_audio(
-                bench.channel, bench.seconds, audio,
+                bench.channel, bench.seconds, audio_src,
                 timeout_s=settings.grab_timeout_s,
             )
             bench.source_url = captured.url
@@ -742,7 +1021,7 @@ def build_router(
 
     # -- listen to it ------------------------------------------------------
     @router.get("/{mode}/audio/{run_id}/{which}")
-    def audio(mode: str, run_id: str, which: str) -> Response:
+    def run_audio(mode: str, run_id: str, which: str) -> Response:
         """The audio bytes, for an ``<audio>`` element.
 
         ``which`` is ``heard`` or ``spoken``: the commentary that went in, and

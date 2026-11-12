@@ -1,0 +1,281 @@
+/* The tokens, and the primitives built from them.
+ *
+ * One file, shared, because three hand-made pages is not a design and the
+ * first thing that drifts is the thing nobody wrote down. Everything below is
+ * either a token or a primitive used on more than one page; anything that
+ * belongs to a single page stays in that page.
+ *
+ * Four rules this follows, and they are the ones the old page broke:
+ *
+ * 1. SEPARATION IS A BORDER, NOT A FILL. Dark interfaces that stack three
+ *    background greys end up muddy and the hierarchy stops reading. One
+ *    surface colour, and a 1px semi-transparent border wherever two things
+ *    are genuinely different objects. Semi-transparent, so it sits correctly
+ *    on whatever is behind it instead of being a lighter opaque grey that
+ *    only works on one background.
+ *
+ * 2. EVERYTHING ON A 4px GRID. Spacing comes from the scale below and from
+ *    nowhere else. Ad-hoc margins are exactly why the old page looked
+ *    almost-aligned, which reads worse than obviously loose.
+ *
+ * 3. CHROME RECEDES, CONTENT ADVANCES. Headings are the same size as body
+ *    text and are distinguished by weight, letter-spacing and colour. The
+ *    biggest, brightest thing on screen should be a channel name or a
+ *    loudness figure -- the data -- not the word "THE SOURCE". The old page
+ *    had it the other way round, and that is most of why it read as
+ *    generated.
+ *
+ * 4. THE ACCENT IS RARE. Amber marks what is selected, what is live, and
+ *    nothing else. A page where every heading is the brand colour has no way
+ *    left to say "this one".
+ */
+
+:root {
+  /* -- ground and surfaces ------------------------------------------- */
+  /* Near-black with a trace of warmth, because the accent is amber and a
+     dead-neutral grey beside it reads as a mistake rather than a choice. */
+  --bg:         #0a0a0b;
+  --bg-sunken:  #070708;
+  --surface:    #101012;
+  --surface-2:  #16161a;
+
+  /* Borders carry the whole structure, so there are exactly three: a hairline
+     for routine separation, a stronger one for the edge of an object, and a
+     focus ring. */
+  --line:       rgba(255, 255, 255, .07);
+  --line-2:     rgba(255, 255, 255, .13);
+  --line-3:     rgba(255, 255, 255, .22);
+
+  /* -- text ---------------------------------------------------------- */
+  --fg:         #ededf0;
+  --fg-2:       #9b9ba4;
+  --fg-3:       #67676f;
+
+  /* -- accent, used sparingly ---------------------------------------- */
+  --accent:     #f5c518;
+  --accent-ink: #0a0a0b;
+  --accent-bg:  rgba(245, 197, 24, .10);
+  --accent-bd:  rgba(245, 197, 24, .38);
+
+  /* -- semantic, separate from the accent ---------------------------- */
+  --ok:         #3fb950;
+  --ok-bg:      rgba(63, 185, 80, .12);
+  --warn:       #d6a01d;
+  --warn-bg:    rgba(214, 160, 29, .12);
+  --bad:        #f85149;
+  --bad-bg:     rgba(248, 81, 73, .12);
+
+  /* -- the 4px scale ------------------------------------------------- */
+  --s1: 4px;  --s2: 8px;  --s3: 12px; --s4: 16px;
+  --s5: 20px; --s6: 24px; --s8: 32px; --s10: 40px;
+
+  /* -- type ---------------------------------------------------------- */
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --fs-xs:   11px;   /* uppercase labels only */
+  --fs-sm:   12px;
+  --fs-base: 13px;   /* the default: 13, not 16 -- this is a tool */
+  --fs-md:   15px;
+  --fs-lg:   18px;
+  --fs-xl:   22px;
+  --fs-data: 20px;   /* the one size reserved for a figure that matters */
+
+  --radius:    6px;
+  --radius-sm: 4px;
+  --row:       32px;   /* one row of anything, on the grid */
+  --rail:      40px;   /* the step-number gutter */
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: var(--fs-base);
+  line-height: 1.5;
+  font-feature-settings: "cv05" 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Focus is visible and it is the same everywhere. A 2px ring offset off the
+   element, so it reads on a bordered object instead of merging with its edge. */
+:focus-visible {
+  outline: 2px solid var(--line-3);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* -- numbers ------------------------------------------------------------
+   Every figure is monospaced and tabular. In a column of loudness readings,
+   proportional digits make the column look bent -- and this page is mostly
+   columns of figures. */
+.num, .mono {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* -- labels -------------------------------------------------------------
+   The only place uppercase is used. Small, wide, quiet: a label names a
+   field, it is not the field. */
+.label {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+
+/* -- panel --------------------------------------------------------------
+   One object. A border, a radius, and a header bar with its own rule. Every
+   bounded thing on these pages is one of these, which is what makes the
+   alignment read: the inner padding is the same everywhere. */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+}
+.panel > .panel-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  min-height: var(--row);
+  padding: 0 var(--s3);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.panel > .panel-head .grow { flex: 1 1 auto; min-width: 0; }
+.panel > .panel-body { padding: var(--s3); }
+.panel > .panel-body.flush { padding: 0; }
+
+/* -- chip ---------------------------------------------------------------
+   State as a shape, not only a colour: a bordered pill with a dot, so it is
+   still legible to someone who cannot separate the hues. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  letter-spacing: .02em;
+  color: var(--fg-2);
+  white-space: nowrap;
+}
+.chip::before {
+  content: "";
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+.chip.bare::before { display: none; }
+.chip.ok   { color: var(--ok);   border-color: rgba(63,185,80,.35);  background: var(--ok-bg); }
+.chip.warn { color: var(--warn); border-color: rgba(214,160,29,.35); background: var(--warn-bg); }
+.chip.bad  { color: var(--bad);  border-color: rgba(248,81,73,.35);  background: var(--bad-bg); }
+.chip.on   { color: var(--accent); border-color: var(--accent-bd);   background: var(--accent-bg); }
+
+/* -- buttons ------------------------------------------------------------ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  height: var(--row);
+  padding: 0 var(--s3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--fg);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn:hover:not(:disabled) { border-color: var(--line-3); background: #1c1c21; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+  padding: 0 var(--s4);
+}
+.btn.primary:hover:not(:disabled) { background: #ffd43a; border-color: #ffd43a; }
+.btn.primary:disabled { background: var(--surface-2); border-color: var(--line-2); color: var(--fg-3); }
+.btn.danger { color: var(--bad); border-color: rgba(248,81,73,.4); }
+.btn.danger:hover:not(:disabled) { background: var(--bad-bg); border-color: var(--bad); }
+
+/* -- form controls ----------------------------------------------------- */
+input[type="number"], input[type="text"], select {
+  height: var(--row);
+  padding: 0 var(--s2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--fg);
+  font: inherit;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+input[type="checkbox"] { accent-color: var(--accent); width: 13px; height: 13px; }
+
+/* -- notes --------------------------------------------------------------
+   A rule down the left rather than a tinted box, so a note beside a panel
+   does not read as another panel. */
+.note {
+  border-left: 2px solid var(--line-2);
+  padding: var(--s2) var(--s3);
+  font-size: var(--fs-sm);
+  color: var(--fg-2);
+}
+.note.warn { border-color: var(--warn); color: var(--warn); background: var(--warn-bg); }
+.note.bad  { border-color: var(--bad);  color: var(--bad);  background: var(--bad-bg); }
+.note.ok   { border-color: var(--ok);   color: var(--ok);   background: var(--ok-bg); }
+
+/* -- a field: label above a figure -------------------------------------
+   Used in rows separated by vertical rules rather than by gaps alone, which
+   is what turns a line of numbers into a readable strip. */
+.field { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.field > .v {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-md);
+  color: var(--fg);
+  line-height: 1.2;
+}
+.field > .v.big { font-size: var(--fs-data); }
+.field > .v.quiet { color: var(--fg-2); }
+
+.strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+.strip > .field {
+  padding: var(--s2) var(--s4) var(--s2) 0;
+  margin-right: var(--s4);
+  border-right: 1px solid var(--line);
+}
+.strip > .field:last-child { border-right: 0; margin-right: 0; padding-right: 0; }
+
+/* -- utilities --------------------------------------------------------- */
+.row { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
+.hide { display: none !important; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scroll-x { overflow-x: auto; }
+
+.pulse { animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: .5 } }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none } }

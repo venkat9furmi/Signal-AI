@@ -6,1180 +6,989 @@
 <title>MMC AI Dubbing</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/static/ui.css">
 <style>
-  /* Same single theme as the commentator page: yellow on black, chosen for a
-     booth screen and a wall display rather than a browser preference. */
-  :root {
-    --yellow: #ffd400;
-    --yellow-dim: #8a7400;
-    --ground: #0b0b0c;
-    --panel: #15151a;
-    --panel-2: #1d1d24;
-    --line: #2e2e38;
-    --text: #f2f2f4;
-    --muted: #8d8d99;
-    --good: #46d16f;
-    --bad: #ff5f52;
-    --warn: #ffa23a;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    background: var(--ground);
-    color: var(--text);
-    font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
-    font-size: 15px;
-    line-height: 1.5;
-  }
-  .wrap { max-width: 1040px; margin: 0 auto; padding: 28px 16px 72px; }
+  /* Page-specific layout only. Tokens and primitives are in ui.css. */
 
-  header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
-  h1 {
-    font-family: "Barlow Condensed", sans-serif;
-    font-size: 40px; font-weight: 700; letter-spacing: .02em;
-    text-transform: uppercase; margin: 0; color: var(--yellow);
-    text-wrap: balance;
-  }
-  .sub { color: var(--muted); margin: 6px 0 0; }
-  a { color: var(--yellow); }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: var(--s6) var(--s4) var(--s10); }
 
-  /* The mode strip: two wirings, one built. */
-  .modes { display: flex; gap: 10px; margin: 22px 0 0; flex-wrap: wrap; }
-  .mode {
-    flex: 1 1 240px; border: 1px solid var(--line); border-radius: 4px;
-    padding: 12px 14px; background: var(--panel); min-width: 0;
+  /* -- masthead ---------------------------------------------------------
+     Small. The page title is chrome; the channel you pick and the level it
+     is running at are the content. */
+  .masthead {
+    display: flex; align-items: center; gap: var(--s3);
+    padding-bottom: var(--s3); margin-bottom: var(--s5);
+    border-bottom: 1px solid var(--line);
   }
-  .mode.on { border-color: var(--yellow); background: #1b1803; }
-  .mode.off { opacity: .55; }
-  .mode h3 {
-    margin: 0; font-family: "Barlow Condensed", sans-serif; font-size: 20px;
-    text-transform: uppercase; letter-spacing: .06em;
+  .masthead h1 {
+    margin: 0; font-size: var(--fs-lg); font-weight: 600;
+    letter-spacing: -.01em;
   }
-  .mode.on h3 { color: var(--yellow); }
-  .mode p { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
-  .tag {
-    display: inline-block; font-family: "IBM Plex Mono", monospace;
-    font-size: 10px; text-transform: uppercase; letter-spacing: .1em;
-    padding: 2px 6px; border-radius: 2px; margin-left: 6px; vertical-align: 2px;
+  .masthead .mark {
+    width: 24px; height: 24px; flex: none;
+    border: 1px solid var(--accent-bd); border-radius: var(--radius-sm);
+    background: var(--accent-bg); color: var(--accent);
+    font-family: var(--mono); font-size: var(--fs-xs); font-weight: 600;
+    display: grid; place-items: center;
   }
-  .tag.live { background: var(--yellow); color: #000; }
-  .tag.na { background: var(--line); color: var(--muted); }
+  .masthead .grow { flex: 1 1 auto; }
 
-  section { margin: 30px 0 0; }
+  /* -- the step sequence ------------------------------------------------
+     A rail on the left carries the numbers, and a 1px spine runs down it
+     joining them. The sequence is real -- you cannot pick a language before
+     a model that carries it -- so drawing it is information, not ornament.
+     Every panel to the right of the rail starts on the same vertical line,
+     which is the alignment the old page did not have. */
+  .steps { display: flex; flex-direction: column; }
+  .step { display: grid; grid-template-columns: var(--rail) 1fr; }
+  .step > .rail { position: relative; }
+  .step > .rail::before {           /* the spine */
+    content: ""; position: absolute;
+    left: calc(var(--row) / 2 - .5px); top: 0; bottom: 0;
+    width: 1px; background: var(--line-2);
+  }
+  .step:first-child > .rail::before { top: calc(var(--row) / 2); }
+  .step:last-child  > .rail::before { bottom: auto; height: calc(var(--row) / 2); }
+  .step > .rail > .n {
+    position: relative;
+    width: var(--row); height: var(--row);
+    border: 1px solid var(--line-2); border-radius: var(--radius-sm);
+    background: var(--bg);
+    display: grid; place-items: center;
+    font-family: var(--mono); font-size: var(--fs-sm); font-weight: 500;
+    color: var(--fg-3);
+  }
+  .step.done > .rail > .n {
+    border-color: var(--accent-bd); background: var(--accent-bg);
+    color: var(--accent);
+  }
+  .step > .main { min-width: 0; padding-bottom: var(--s5); }
+  .step:last-child > .main { padding-bottom: 0; }
 
-  /* the live / clip switch */
-  .tabs { display: flex; gap: 6px; margin: 0 0 16px; flex-wrap: wrap; }
-  .tab {
-    background: transparent; color: var(--dim); border: 1px solid var(--line);
-    padding: 7px 14px; font: inherit; font-size: 13px; letter-spacing: .04em;
-    text-transform: uppercase; cursor: pointer; border-radius: 2px;
+  .step-head { display: flex; align-items: baseline; gap: var(--s2);
+               min-height: var(--row); flex-wrap: wrap; }
+  .step-head h2 {
+    margin: 0; font-size: var(--fs-base); font-weight: 600;
+    letter-spacing: .01em; color: var(--fg);
   }
-  .tab:hover { color: var(--yellow); border-color: var(--yellow); }
-  .tab.on { background: var(--yellow); color: #000; border-color: var(--yellow); }
+  .step-head .picked {
+    font-family: var(--mono); font-size: var(--fs-sm); color: var(--accent);
+  }
+  .step-head .grow { flex: 1 1 auto; }
+  .why { margin: 0 0 var(--s3); font-size: var(--fs-sm); color: var(--fg-3);
+         max-width: 78ch; }
 
-  /* what a running session looks like */
-  .phase {
-    display: inline-block; padding: 3px 10px; border-radius: 2px;
-    font-size: 12px; letter-spacing: .06em; text-transform: uppercase;
-    border: 1px solid currentColor;
+  /* -- step 1: the channel table ---------------------------------------
+     A real table: a header row, fixed columns, the numeric column right
+     aligned and tabular. A severity stripe down the left edge so state has
+     a shape and not only a colour. */
+  .chtable { max-height: 316px; overflow-y: auto; }
+  .chrow {
+    display: grid;
+    grid-template-columns: 3px 124px minmax(0, 1fr) 76px 112px;
+    align-items: center; gap: 0;
+    width: 100%; height: var(--row);
+    padding: 0; margin: 0;
+    border: 0; border-bottom: 1px solid var(--line);
+    background: none; color: inherit; font: inherit;
+    text-align: left; cursor: pointer;
   }
-  .phase.waiting { color: var(--dim); }
-  .phase.going   { color: var(--good); }
-  .phase.ended   { color: var(--yellow); }
-  .phase.broke   { color: var(--bad); }
-  .pulse { animation: pulse 1.4s ease-in-out infinite; }
-  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .45 } }
-  @media (prefers-reduced-motion: reduce) { .pulse { animation: none } }
-
-  .caps { margin: 14px 0 0; max-height: 260px; overflow-y: auto; }
-  .cap {
-    border-top: 1px solid var(--line); padding: 8px 0;
-    display: grid; grid-template-columns: 54px 1fr 1fr; gap: 12px;
-    align-items: baseline;
+  .chrow > * { padding: 0 var(--s3) 0 0; }
+  .chrow > :first-child { padding: 0; }
+  .chrow.head {
+    height: 26px; cursor: default; position: sticky; top: 0; z-index: 1;
+    background: var(--surface-2); border-bottom: 1px solid var(--line-2);
   }
-  .cap:first-child { border-top: 0; }
-  .cap .t { color: var(--dim); font-size: 12px; font-variant-numeric: tabular-nums; }
-  .cap .h { color: var(--dim); }
-  .cap .s { color: var(--fg); }
-  @media (max-width: 680px) {
-    .cap { grid-template-columns: 54px 1fr; }
-    .cap .s { grid-column: 2; }
+  .chrow.head > * {
+    font-size: var(--fs-xs); font-weight: 500; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--fg-3);
   }
-  /* the coverage matrix */
-  .matrix { width: 100%; border-collapse: collapse; font-size: 14px; }
-  .matrix th, .matrix td {
-    padding: 7px 10px; text-align: left; border-bottom: 1px solid var(--line);
-    white-space: nowrap;
+  .chrow:not(.head):hover { background: var(--surface-2); }
+  .chrow.on { background: var(--accent-bg); }
+  .chrow:disabled { cursor: not-allowed; }
+  .chrow:disabled .name, .chrow:disabled .what { color: var(--fg-3); }
+  .chrow:last-child { border-bottom: 0; }
+  .chrow .stripe { height: 100%; background: transparent; }
+  .chrow.s-commentary .stripe { background: var(--ok); }
+  .chrow.s-filler .stripe     { background: var(--warn); }
+  .chrow.s-bad .stripe        { background: var(--bad); }
+  .chrow .name {
+    font-family: var(--mono); font-size: var(--fs-base); font-weight: 500;
+    color: var(--fg);
   }
-  .matrix th { color: var(--dim); font-weight: 500; font-size: 12px;
-               text-transform: uppercase; letter-spacing: .06em; }
-  .matrix td.v { text-align: center; font-weight: 600; }
-  .v-yes  { color: var(--good); }
-  .v-near { color: var(--yellow); }
-  .v-no   { color: var(--bad); opacity: .8; }
-  .v-unknown { color: var(--dim); }
-
-  /* ticky boxes for models and languages */
-  .picks { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 0; }
-  .pick {
-    display: inline-flex; align-items: center; gap: 7px;
-    border: 1px solid var(--line); padding: 6px 11px; border-radius: 2px;
-    font-size: 14px; cursor: pointer; user-select: none;
+  .chrow.on .name { color: var(--accent); }
+  .chrow .what { font-size: var(--fs-sm); color: var(--fg-2);
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chrow .lvl {
+    font-family: var(--mono); font-variant-numeric: tabular-nums;
+    font-size: var(--fs-sm); color: var(--fg-2); text-align: right;
   }
-  .pick:hover { border-color: var(--yellow); }
-  .pick input { accent-color: var(--yellow); margin: 0; }
-  .pick.off { opacity: .45; cursor: not-allowed; }
-  .pick.off:hover { border-color: var(--line); }
-  .pick small { color: var(--dim); }
-
-  /* blind entries */
-  .entries {
-    display: grid; gap: 14px; margin: 16px 0 0;
-    grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
-  }
-  .entry { border: 1px solid var(--line); padding: 14px; border-radius: 2px; }
-  .entry.top { border-color: var(--yellow); }
-  .entry h4 {
-    margin: 0 0 10px; font-size: 15px; display: flex;
-    align-items: baseline; gap: 9px;
-  }
-  .entry .tagline { font-size: 34px; line-height: 1; color: var(--yellow);
-                    font-family: "Barlow Condensed", sans-serif; }
-  .entry audio { width: 100%; margin: 0 0 10px; }
-  .entry blockquote {
-    margin: 0 0 10px; padding: 0 0 0 10px; border-left: 2px solid var(--line);
-    font-size: 14px; line-height: 1.5;
-  }
-  .entry blockquote.empty { color: var(--dim); font-style: italic; }
-  .who { display: flex; gap: 2px; margin: 10px 0 0; }
-  .who button {
-    flex: 1; padding: 7px 0; font-size: 14px; background: transparent;
-    color: var(--dim); border: 1px solid var(--line); cursor: pointer;
-  }
-  .who button:hover { color: var(--yellow); border-color: var(--yellow); }
-  .who button.mine { background: var(--yellow); color: #000;
-                     border-color: var(--yellow); }
-  .said { margin: 8px 0 0; font-size: 12px; color: var(--dim); }
-  .reveal-name {
-    margin: 10px 0 0; font-size: 13px; color: var(--yellow);
-    letter-spacing: .04em; text-transform: uppercase;
+  .chrow .st { display: flex; justify-content: flex-end; }
+  @media (max-width: 720px) {
+    .chrow { grid-template-columns: 3px 104px minmax(0, 1fr) 64px; }
+    .chrow .st { display: none; }
   }
 
-  .warn-box {
-    border-left: 3px solid var(--warn); padding: 8px 12px; margin: 14px 0 0;
-    color: var(--warn); font-size: 14px; background: rgba(255,180,0,.06);
+  .filters { display: flex; align-items: center; gap: var(--s4);
+             flex-wrap: wrap; font-size: var(--fs-sm); color: var(--fg-2); }
+  .filters label { display: inline-flex; align-items: center; gap: 6px;
+                   cursor: pointer; }
+
+  /* -- step 2: model cards --------------------------------------------- */
+  .models { display: grid; gap: var(--s2);
+            grid-template-columns: repeat(auto-fit, minmax(248px, 1fr)); }
+  .modelcard {
+    display: flex; flex-direction: column; gap: 6px;
+    padding: var(--s3);
+    border: 1px solid var(--line-2); border-radius: var(--radius);
+    background: var(--surface); color: inherit; font: inherit;
+    text-align: left; cursor: pointer;
   }
-  h2 {
-    font-family: "Barlow Condensed", sans-serif; font-size: 13px;
-    text-transform: uppercase; letter-spacing: .18em; color: var(--muted);
-    margin: 0 0 10px; font-weight: 600;
-    border-bottom: 1px solid var(--line); padding-bottom: 6px;
+  .modelcard:hover:not(:disabled) { border-color: var(--line-3); }
+  .modelcard.on { border-color: var(--accent-bd); background: var(--accent-bg); }
+  .modelcard:disabled { cursor: not-allowed; }
+  .modelcard .top { display: flex; align-items: center; gap: var(--s2); }
+  .modelcard h3 {
+    margin: 0; font-size: var(--fs-base); font-weight: 600; flex: 1 1 auto;
   }
-  .card {
-    background: var(--panel); border: 1px solid var(--line);
-    border-radius: 4px; padding: 16px;
+  .modelcard.on h3 { color: var(--accent); }
+  .modelcard p { margin: 0; font-size: var(--fs-sm); color: var(--fg-3); }
+  .modelcard:disabled h3 { color: var(--fg-2); }
+
+  /* -- step 3: languages ----------------------------------------------- */
+  .langs { display: flex; flex-wrap: wrap; gap: var(--s2); }
+  .langbtn {
+    display: inline-flex; align-items: center; gap: var(--s2);
+    height: var(--row); padding: 0 var(--s3);
+    border: 1px solid var(--line-2); border-radius: var(--radius-sm);
+    background: var(--surface); color: var(--fg); font: inherit; cursor: pointer;
+  }
+  .langbtn:hover:not(:disabled) { border-color: var(--line-3); }
+  .langbtn.on {
+    background: var(--accent); border-color: var(--accent);
+    color: var(--accent-ink); font-weight: 600;
+  }
+  .langbtn:disabled { opacity: .4; cursor: not-allowed; }
+  .langbtn:disabled .t { text-decoration: line-through; }
+  .langbtn .t { font-family: var(--mono); font-size: var(--fs-xs);
+                color: var(--fg-3); }
+  .langbtn.on .t { color: rgba(10,10,11,.55); }
+
+  /* -- step 4: the running session ------------------------------------- */
+  .leg { margin-top: var(--s2); }
+  .leg .lname { font-size: var(--fs-base); font-weight: 600; color: var(--fg); }
+  .leg .players {
+    display: grid; gap: var(--s3);
+    grid-template-columns: repeat(auto-fit, minmax(272px, 1fr));
+    padding: var(--s3); border-bottom: 1px solid var(--line);
+  }
+  audio { width: 100%; height: 32px; display: block; margin-top: var(--s1); }
+
+  /* the synced transcript, as a table */
+  .script { max-height: 272px; overflow-y: auto; }
+  .tline {
+    display: grid; grid-template-columns: 56px minmax(0,1fr) minmax(0,1fr);
+    gap: 0; align-items: baseline;
+    padding: 6px var(--s3);
+    border-bottom: 1px solid var(--line);
+  }
+  .tline > .h { border-right: 1px solid var(--line); margin-right: var(--s3);
+                padding-right: var(--s3); }
+  .tline > .t { padding-right: var(--s2); }
+  .tline:last-child { border-bottom: 0; }
+  .tline.head {
+    position: sticky; top: 0; z-index: 1;
+    background: var(--surface-2); border-bottom: 1px solid var(--line-2);
+    padding-top: 4px; padding-bottom: 4px;
+  }
+  .tline.head > * {
+    font-size: var(--fs-xs); font-weight: 500; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--fg-3);
+  }
+  .tline .t { font-family: var(--mono); font-variant-numeric: tabular-nums;
+              font-size: var(--fs-xs); color: var(--fg-3); }
+  .tline .h { color: var(--fg-2); }
+  .tline .s { color: var(--fg); }
+  .tline.now { background: var(--accent-bg);
+               box-shadow: inset 2px 0 0 var(--accent); }
+  .tline.now .h { color: var(--fg); }
+  .tline.now .s { color: var(--accent); font-weight: 500; }
+  @media (max-width: 720px) {
+    .tline { grid-template-columns: 56px minmax(0,1fr); }
+    .tline .s { grid-column: 2; }
+    .tline > .h { border-right: 0; margin-right: 0; padding-right: 0; }
   }
 
-  /* 1. the model */
-  .model-name {
-    font-family: "IBM Plex Mono", monospace; font-size: 20px;
-    color: var(--yellow); word-break: break-all;
-  }
-  .steps { display: flex; gap: 10px; margin: 14px 0 0; flex-wrap: wrap; }
-  .step {
-    flex: 1 1 190px; background: var(--panel-2); border-radius: 3px;
-    padding: 10px 12px; border-left: 2px solid var(--yellow-dim); min-width: 0;
-  }
-  .step .n {
-    font-family: "Barlow Condensed", sans-serif; text-transform: uppercase;
-    letter-spacing: .06em; font-size: 15px; color: var(--text);
-  }
-  .step code {
-    font-family: "IBM Plex Mono", monospace; font-size: 11px;
-    color: var(--yellow-dim); display: block; margin: 2px 0 5px;
-    word-break: break-all;
-  }
-  .step p { margin: 0; font-size: 12.5px; color: var(--muted); }
-  .absent { border-left-color: var(--line); }
-  .absent .n { color: var(--muted); text-decoration: line-through; }
+  .empty { padding: var(--s4) var(--s3); font-size: var(--fs-sm);
+           color: var(--fg-3); }
 
-  .facts { display: flex; gap: 22px; flex-wrap: wrap; margin: 14px 0 0; }
-  .fact .k {
-    font-size: 10.5px; text-transform: uppercase; letter-spacing: .12em;
-    color: var(--muted);
-  }
-  .fact .v {
-    font-family: "IBM Plex Mono", monospace; font-size: 15px;
-    font-variant-numeric: tabular-nums;
-  }
+  /* -- step 5: locked --------------------------------------------------- */
+  .step.locked .main { opacity: .7; }
+  ul.needs { margin: var(--s3) 0 0; padding-left: var(--s4);
+             font-size: var(--fs-sm); color: var(--fg-3); }
+  ul.needs li { margin-bottom: var(--s1); }
 
-  /* 2. credit */
-  .meter {
-    height: 8px; background: var(--panel-2); border-radius: 4px;
-    overflow: hidden; margin: 4px 0 12px;
-  }
-  .meter i { display: block; height: 100%; background: var(--yellow); }
-  .meter i.hot { background: var(--bad); }
-  .note {
-    font-size: 12.5px; color: var(--muted); margin: 12px 0 0;
-    border-left: 2px solid var(--line); padding-left: 10px;
-  }
-
-  /* 3. run it */
-  .form { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
-  label {
-    display: block; font-size: 10.5px; text-transform: uppercase;
-    letter-spacing: .12em; color: var(--muted); margin-bottom: 4px;
-  }
-  select, input[type=number] {
-    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
-    border-radius: 3px; padding: 9px 10px; font: inherit; font-size: 14px;
-    min-width: 0;
-  }
-  select:focus-visible, input:focus-visible, button:focus-visible {
-    outline: 2px solid var(--yellow); outline-offset: 1px;
-  }
-  button {
-    background: var(--yellow); color: #000; border: 0; border-radius: 3px;
-    padding: 10px 20px; font-family: "Barlow Condensed", sans-serif;
-    font-size: 17px; font-weight: 600; text-transform: uppercase;
-    letter-spacing: .06em; cursor: pointer;
-  }
-  button[disabled] { background: var(--line); color: var(--muted); cursor: progress; }
-  .status { margin: 12px 0 0; font-size: 13.5px; min-height: 20px; }
-  .status.err { color: var(--bad); }
-  .status.ok { color: var(--good); }
-
-  /* 4. listen */
-  .pair { display: flex; gap: 14px; flex-wrap: wrap; }
-  .side { flex: 1 1 320px; min-width: 0; }
-  .side h4 {
-    margin: 0 0 6px; font-family: "Barlow Condensed", sans-serif;
-    font-size: 16px; text-transform: uppercase; letter-spacing: .08em;
-  }
-  .side .lang {
-    font-family: "IBM Plex Mono", monospace; font-size: 11px;
-    color: var(--yellow-dim); margin-left: 6px;
-  }
-  audio { width: 100%; margin: 0 0 8px; }
-  blockquote {
-    margin: 0; padding: 10px 12px; background: var(--panel-2);
-    border-radius: 3px; font-size: 14.5px; min-height: 58px;
-  }
-  blockquote.empty { color: var(--muted); font-style: italic; }
-  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0 0; }
-  .chip {
-    font-family: "IBM Plex Mono", monospace; font-size: 11px;
-    background: var(--panel-2); border: 1px solid var(--line);
-    border-radius: 2px; padding: 3px 7px; color: var(--muted);
-    font-variant-numeric: tabular-nums;
-  }
-  .chip b { color: var(--text); font-weight: 500; }
-
-  .history { width: 100%; border-collapse: collapse; margin-top: 10px; }
-  .history th {
-    text-align: left; font-size: 10.5px; text-transform: uppercase;
-    letter-spacing: .12em; color: var(--muted); font-weight: 600;
-    border-bottom: 1px solid var(--line); padding: 6px 8px;
-  }
-  .history td {
-    padding: 7px 8px; border-bottom: 1px solid var(--panel-2); font-size: 13px;
-    font-variant-numeric: tabular-nums;
-  }
-  .history tbody tr { cursor: pointer; }
-  .history tbody tr:hover td { background: var(--panel-2); }
-  .st { font-family: "IBM Plex Mono", monospace; font-size: 11px; }
-  .st.ok { color: var(--good); }
-  .st.bad { color: var(--bad); }
-  .st.skip { color: var(--warn); }
-  .scroll { overflow-x: auto; }
-  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+  .status { font-size: var(--fs-sm); color: var(--fg-2); min-height: 18px; }
+  .status.bad { color: var(--bad); }
 </style>
 </head>
 <body>
 <div class="wrap">
 
-  <header>
+  <div class="masthead">
+    <span class="mark">AI</span>
     <h1>MMC AI Dubbing</h1>
-    <a href="/qc">QC Commentary &rarr;</a>
-    <a href="/">&larr; Home</a>
-  </header>
-  <p class="sub">
-    Take a channel that is on air and hear it translated as it happens.
-    Nothing here is published and no commentator sees it &mdash; this is for
-    deciding whether a model is good enough to put in front of anyone.
-  </p>
+    <span class="grow"></span>
+    <span class="chip bare" id="standing-chip">&hellip;</span>
+    <a href="/">Both tools &rarr;</a>
+  </div>
+  <p class="why" id="standing" style="margin-top:calc(var(--s4) * -1)">&nbsp;</p>
 
-  <div class="modes" id="modes"></div>
+  <div class="steps">
 
-  <section>
-    <h2>1 &middot; The model</h2>
-    <div class="card" id="model"><div class="model-name">&hellip;</div></div>
-  </section>
-
-  <section>
-    <h2>1b &middot; Which model reaches which language</h2>
-    <div class="card">
-      <p class="note" style="margin:0 0 12px">
-        Asked before a comparison rather than discovered during one. With all
-        six of MMC's languages as targets, some models drop out immediately
-        &mdash; and a table saying so costs nothing, where six failed entries
-        cost a capture and whatever they were billed for.
-      </p>
-      <div class="scroll"><table class="matrix" id="coverage"></table></div>
-    </div>
-  </section>
-
-  <section>
-    <h2>2 &middot; Credit</h2>
-    <div class="card" id="credits">&hellip;</div>
-  </section>
-
-  <section>
-    <h2>3 &middot; Translate it</h2>
-    <div class="card">
-      <div class="tabs">
-        <button class="tab on" id="tab-bench">Compare models</button>
-        <button class="tab" id="tab-live">Live, as it happens</button>
-        <button class="tab" id="tab-clip">One model, one clip</button>
-      </div>
-
-      <div id="pane-bench">
-        <div class="form">
-          <div style="flex:2 1 220px">
-            <label for="bench-channel">Channel</label>
-            <select id="bench-channel" style="width:100%"></select>
+    <!-- 1 --------------------------------------------------------------- -->
+    <section class="step" id="step-source">
+      <div class="rail"><div class="n">1</div></div>
+      <div class="main">
+        <div class="step-head">
+          <h2>Source</h2>
+          <span class="picked" id="src-picked"></span>
+          <span class="grow"></span>
+          <span class="label" id="src-count"></span>
+        </div>
+        <p class="why">Pick a channel that is on air. The quality engine is
+          already listening to every one of them, so this is what it hears
+          right now &mdash; a channel on the holding clip, or running quiet,
+          will make any model sound worse than it is.</p>
+        <div class="panel">
+          <div class="panel-head">
+            <div class="filters grow">
+              <label><input type="checkbox" id="only-live" checked> On air only</label>
+              <label><input type="checkbox" id="only-talking"> Carrying commentary</label>
+            </div>
           </div>
-          <div style="flex:0 1 110px">
-            <label for="bench-seconds">Seconds</label>
-            <input id="bench-seconds" type="number" min="3" max="60" step="1"
-                   value="15" style="width:100%">
-          </div>
-          <div style="flex:2 1 240px">
-            <label for="bench-label">What is this comparison for?</label>
-            <input id="bench-label" type="text" style="width:100%"
-                   placeholder="e.g. Greek output, first pass">
+          <div class="panel-body flush">
+            <div class="chtable" id="channels">
+              <div class="empty">Reading the channel list&hellip;</div>
+            </div>
           </div>
         </div>
-
-        <label style="display:block;margin:14px 0 0">Models</label>
-        <div class="picks" id="bench-providers"></div>
-
-        <label style="display:block;margin:14px 0 0">Translate into</label>
-        <div class="picks" id="bench-targets"></div>
-
-        <div class="form" style="margin-top:16px;align-items:center">
-          <button id="go-bench">Run the comparison</button>
-          <p class="note" id="bench-estimate" style="margin:0"></p>
-        </div>
-        <p class="status" id="bench-status"></p>
       </div>
+    </section>
 
-      <div id="pane-live">
-        <div class="form">
-          <div style="flex:2 1 220px">
-            <label for="channel">Channel</label>
-            <select id="channel" style="width:100%"></select>
-          </div>
-          <div style="flex:1 1 150px">
-            <label for="target">Translate into</label>
-            <select id="target" style="width:100%"></select>
-          </div>
-          <div style="flex:0 1 120px">
-            <label for="live-seconds">Stop after</label>
-            <input id="live-seconds" type="number" min="10" max="1800" step="10"
-                   value="60" style="width:100%">
-          </div>
-          <button id="go-live">Start</button>
-          <button id="stop-live" hidden>Stop</button>
+    <!-- 2 --------------------------------------------------------------- -->
+    <section class="step" id="step-model">
+      <div class="rail"><div class="n">2</div></div>
+      <div class="main">
+        <div class="step-head">
+          <h2>Model</h2>
+          <span class="picked" id="model-picked"></span>
         </div>
-        <p class="status" id="live-status"></p>
-        <div id="live-warn"></div>
+        <p class="why">A model you cannot pick says why, in a line, rather
+          than failing when you press Start.</p>
+        <div class="models" id="models"></div>
+        <div id="model-note" style="margin-top:var(--s3)"></div>
       </div>
+    </section>
 
-      <div id="pane-clip" hidden>
-        <div class="form">
-          <div style="flex:0 1 110px">
-            <label for="seconds">Seconds</label>
-            <input id="seconds" type="number" min="3" max="60" step="1" value="15"
-                   style="width:100%">
-          </div>
-          <button id="go">Translate a clip</button>
+    <!-- 3 --------------------------------------------------------------- -->
+    <section class="step" id="step-langs">
+      <div class="rail"><div class="n">3</div></div>
+      <div class="main">
+        <div class="step-head">
+          <h2>Languages</h2>
+          <span class="picked" id="lang-picked"></span>
         </div>
-        <p class="note">
-          Records a few seconds, then transcribes, translates and speaks it in
-          three separate calls. Slower than real time and a different product
-          from the live path &mdash; different languages, different billing.
-        </p>
-        <p class="status" id="status"></p>
+        <p class="why">One commentator, several markets. Each language is its
+          own session on the model; the audio is pulled once and shared, so
+          the only thing that multiplies is what the model charges.</p>
+        <div class="langs" id="langs"></div>
+        <div class="panel" id="cost-panel" style="margin-top:var(--s3)">
+          <div class="panel-body">
+            <div class="strip" id="lang-cost"></div>
+          </div>
+        </div>
+        <div id="lang-note" style="margin-top:var(--s3)"></div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <section>
-    <h2>4 &middot; Listen and judge</h2>
-    <div class="card" id="listen">
-      <p class="sub" style="margin:0">
-        Nothing yet. Pick a channel that is on air and press Start.
-      </p>
-    </div>
-    <div id="bench-view"></div>
-    <div class="scroll">
-      <table class="history" id="history" hidden>
-        <thead><tr>
-          <th>When</th><th>Channel</th><th>Heard</th><th>Spoke</th>
-          <th>Took</th><th>State</th>
-        </tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-  </section>
+    <!-- 4 --------------------------------------------------------------- -->
+    <section class="step" id="step-listen">
+      <div class="rail"><div class="n">4</div></div>
+      <div class="main">
+        <div class="step-head"><h2>Listen</h2></div>
+        <p class="why">It translates while the match is going. Each language
+          gets the commentary and its own voice as playable audio, and the
+          transcript follows whichever you play.</p>
+        <div class="row">
+          <button class="btn primary" id="go" disabled>Start</button>
+          <button class="btn danger hide" id="stop">Stop</button>
+          <label class="row" style="gap:var(--s2);font-size:var(--fs-sm);color:var(--fg-3)">
+            Stop after
+            <input type="number" id="seconds" min="10" max="1800" step="10" style="width:76px">
+            s
+          </label>
+        </div>
+        <p class="status" id="status" style="margin:var(--s2) 0 0"></p>
+        <div id="live" style="margin-top:var(--s3)"></div>
+      </div>
+    </section>
 
-  <section>
-    <h2>5 &middot; What the team concluded</h2>
-    <div class="card">
-      <p class="note" style="margin:0 0 12px">
-        Every judgement anyone has recorded, by model and target language.
-        Ranked by mean score, then by how many people backed it &mdash; a 5.0
-        from one person is not better evidence than a 4.6 from six.
-      </p>
-      <div class="scroll"><table class="matrix" id="scoreboard"></table></div>
-    </div>
-  </section>
+    <!-- 5 --------------------------------------------------------------- -->
+    <section class="step locked" id="step-broadcast">
+      <div class="rail"><div class="n">5</div></div>
+      <div class="main">
+        <div class="step-head">
+          <h2>Broadcast it back</h2>
+          <span class="chip bare">Version 2</span>
+        </div>
+        <p class="why">Sending the translated voice out as a channel of its
+          own, so a Greek listener can tune in to it. Deliberately not built:
+          we only ever pull audio, and nothing here can put audio anywhere.</p>
+        <div class="row">
+          <button class="btn" disabled>Publish this translation</button>
+        </div>
+        <ul class="needs">
+          <li>A publishing point from the vendor, one per output language.
+            Theirs is publish-only, and writing into a commentator's own
+            channel is not an option.</li>
+          <li>A jitter buffer, to turn bursts of translated speech into an
+            unbroken stream.</li>
+          <li>A decision about what happens when another language takes longer
+            to say than the English did.</li>
+          <li>A written answer on both vendors' terms, given the audience
+            would be a bookmaker's customers.</li>
+        </ul>
+      </div>
+    </section>
 
+  </div>
 </div>
 
 <script>
-"use strict";
+// ---------------------------------------------------------------------
+// State. Deliberately small: the page is four choices and one running
+// session, and everything on screen is derived from these.
+// ---------------------------------------------------------------------
 const MODE = "shadow";
-const el = (id) => document.getElementById(id);
-const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g,
+const API = `/api/translate/${MODE}`;
+
+const state = {
+  channel: "",        // step 1
+  provider: "",       // step 2
+  targets: [],        // step 3
+  channels: [],
+  providers: [],
+  languages: { tags: [], note: "", missing: [] },
+  limits: { seconds: 60, targets: 4, channels: 1 },
+  group: null,
+  polling: null,
+  // Audio elements are built once per leg and then left alone. Rebuilding
+  // them on each poll restarts playback from the beginning every second and
+  // a half, which makes a live translation impossible to actually listen to.
+  players: new Map(),
+};
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
   (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-async function get(path) {
-  const r = await fetch(path, { headers: { accept: "application/json" } });
-  if (!r.ok) throw new Error((await r.text()).slice(0, 300) || r.statusText);
-  return r.json();
-}
-
-function fmtAgo(t) {
-  const s = Math.max(0, Date.now() / 1000 - t);
-  if (s < 60) return Math.round(s) + "s ago";
-  if (s < 3600) return Math.round(s / 60) + "m ago";
-  return Math.round(s / 3600) + "h ago";
-}
-
-/* -- the mode strip -------------------------------------------------- */
-async function loadModes() {
-  const data = await get("/api/translate/modes");
-  el("modes").innerHTML = data.modes.map((m) => `
-    <div class="mode ${m.built ? "on" : "off"}">
-      <h3>${esc(m.title)}
-        <span class="tag ${m.built ? "live" : "na"}">${m.built ? "built" : "not built"}</span>
-      </h3>
-      <p>${esc(m.purpose)}</p>
-      <p><b>Seen by:</b> ${esc(m.audience)}</p>
-      ${m.pending ? `<p><b>Needs:</b> ${esc(m.pending)}</p>` : ""}
-    </div>`).join("");
-}
-
-/* -- 1. the model ---------------------------------------------------- */
-async function loadModel() {
-  const d = await get(`/api/translate/${MODE}/model`);
-  const caps = d.capabilities || {};
-  const health = d.health || {};
-  const steps = (caps.steps || []).map((s, i) => `
-    <div class="step">
-      <div class="n">${i + 1}. ${esc(s.name)}</div>
-      <code>${esc(s.endpoint)}</code>
-      <p>${esc(s.detail)}</p>
-    </div>`).join("");
-  const absent = (caps.not_available || []).map((s) => `
-    <div class="step absent">
-      <div class="n">${esc(s.name)}</div>
-      <code>${esc(s.endpoint)}</code>
-      <p>${esc(s.detail)}</p>
-    </div>`).join("");
-  const others = (d.providers || []).filter((p) => p.name !== d.provider);
-  const live = d.live || {};
-  const lc = live.capabilities || {};
-  LIVE_LIMIT = live.seconds || 60;
-
-  el("model").innerHTML = `
-    <div class="model-name">${esc(d.model || d.provider)}</div>
-    <div class="facts">
-      <div class="fact"><div class="k">Reachable</div>
-        <div class="v" style="color:${health.ok ? "var(--good)" : "var(--bad)"}">
-          ${health.ok ? "yes" : "no"}</div></div>
-      <div class="fact"><div class="k">Voice</div>
-        <div class="v">${esc(caps.voice_model || "-")}</div></div>
-      <div class="fact"><div class="k">Languages</div>
-        <div class="v">${(d.languages || []).length || "-"}</div></div>
-      <div class="fact"><div class="k">Voices</div>
-        <div class="v">${(d.voices || []).length || "-"}</div></div>
-      <div class="fact"><div class="k">Clip length</div>
-        <div class="v">${esc(d.grab_seconds)}s</div></div>
-      <div class="fact"><div class="k">Live</div>
-        <div class="v" style="color:${live.available ? "var(--good)" : "var(--dim)"}">
-          ${live.available ? esc(lc.transport || "yes") : "no"}</div></div>
-    </div>
-    ${live.available ? `
-      <div class="steps">
-        <div class="step">
-          <div class="n">Live, as it happens</div>
-          <code>${esc(lc.endpoint || "")}</code>
-          <p>Audio goes up as it arrives and translated speech comes back on
-             the same socket, ${esc(lc.wire ? lc.wire.rate : "")} Hz mono.
-             ${(lc.modes || []).map((m) => esc(m.name) + ": " + esc(m.detail)).join(" ")}</p>
-        </div>
-      </div>
-      ${(lc.caveats || []).map((c) => `<p class="warn-box">${esc(c)}</p>`).join("")}
-    ` : (live.why ? `<p class="note">${esc(live.why)}</p>` : "")}
-    ${health.ok ? "" : `<p class="status err">${esc(health.error || "cannot reach the model")}</p>`}
-    <div class="steps">${steps}</div>
-    ${absent ? `<div class="steps">${absent}</div>` : ""}
-    ${others.length ? `<p class="note">Also in this build:
-      ${others.map((p) => esc(p.name) + (p.selectable ? "" : ` &mdash; ${esc(p.blocked)}`)).join("; ")}.</p>` : ""}
-  `;
-
-  pickBoxes("bench-providers", (d.providers || []).map((p) => ({
-    value: p.name,
-    text: p.title || p.name,
-    note: p.cost === "free" ? "free" : "",
-    on: p.selectable,
-    off: !p.selectable,
-    title: p.selectable ? p.detail : p.blocked,
-  })));
-
-  const langs = d.languages || [];
-  el("target").innerHTML = (langs.length
-    ? langs.map((l) =>
-        `<option value="${esc(l.tag)}"${l.tag === d.target_language ? " selected" : ""}>` +
-        `${esc(l.name)} (${esc(l.tag)})</option>`)
-    : [`<option value="${esc(d.target_language)}">${esc(d.target_language)}</option>`]
-  ).join("");
-  el("seconds").value = d.grab_seconds;
-  el("live-seconds").value = LIVE_LIMIT;
-}
-
-/* -- 2. credit ------------------------------------------------------- */
-async function loadCredits() {
-  const d = await get(`/api/translate/${MODE}/credits`);
-  const b = d.budget || {}, today = d.today || {}, pc = d.provider_credits || {};
-  const frac = Math.min(1, b.fraction == null ? 0 : b.fraction);
-  el("credits").innerHTML = `
-    <div class="meter"><i class="${frac > 0.8 ? "hot" : ""}"
-      style="width:${(frac * 100).toFixed(1)}%"></i></div>
-    <div class="facts">
-      <div class="fact"><div class="k">Sent today</div>
-        <div class="v">${Number(today.seconds || 0).toFixed(0)}s</div></div>
-      <div class="fact"><div class="k">Daily cap</div>
-        <div class="v">${esc(b.daily_minutes)} min</div></div>
-      <div class="fact"><div class="k">Left</div>
-        <div class="v">${b.remaining_minutes == null ? "-" : b.remaining_minutes + " min"}</div></div>
-      <div class="fact"><div class="k">Runs today</div>
-        <div class="v">${today.runs || 0}</div></div>
-      <div class="fact"><div class="k">Failed</div>
-        <div class="v" style="color:${today.failed ? "var(--bad)" : "inherit"}">
-          ${today.failed || 0}</div></div>
-      <div class="fact"><div class="k">Key set</div>
-        <div class="v">${d.key_set ? "yes" : "no"}</div></div>
-      <div class="fact"><div class="k">Last call cost</div>
-        <div class="v">${esc(pc.last || "-")}</div></div>
-    </div>
-    ${b.blocked ? `<p class="status err">Stopped: ${esc(b.blocked_reason)}</p>` : ""}
-    <p class="note">${esc(pc.note || "")}</p>
-  `;
-}
-
-/* -- 3. channels and the run ----------------------------------------- */
-async function loadChannels() {
-  const d = await get(`/api/translate/${MODE}/channels`);
-  const options = d.channels.map((c) =>
-    `<option value="${esc(c.channel)}">${esc(c.label)} &mdash; ${esc(c.language || "?")}</option>`
-  ).join("");
-  el("channel").innerHTML = options;
-  el("bench-channel").innerHTML = options;
-}
-
-async function runOnce() {
-  const button = el("go"), status = el("status");
-  const seconds = Number(el("seconds").value) || 15;
-  button.disabled = true;
-  status.className = "status";
-  status.textContent =
-    `Listening to ${el("channel").value} for ${seconds}s, then translating. ` +
-    `Give it about ${seconds + 20}s.`;
-  try {
-    const r = await fetch(`/api/translate/${MODE}/run`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        channel: el("channel").value,
-        target: el("target").value,
-        seconds: seconds,
-      }),
-    });
-    const body = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(body.detail || r.statusText);
-    show(body);
-    if (body.status === "ok") {
-      status.className = "status ok";
-      status.textContent = `Done in ${body.total_s}s. Press play below.`;
-    } else {
-      status.className = "status err";
-      status.textContent = `${body.status}: ${body.error || "no detail given"}`;
-    }
-    await Promise.all([loadCredits(), loadHistory()]);
-  } catch (e) {
-    status.className = "status err";
-    status.textContent = String(e.message || e);
-  } finally {
-    button.disabled = false;
+async function api(path, options) {
+  const res = await fetch(path, options);
+  let body = null;
+  try { body = await res.json(); } catch (e) { /* not every error is JSON */ }
+  if (!res.ok) {
+    const why = (body && (body.detail || body.error)) || `HTTP ${res.status}`;
+    throw new Error(typeof why === "string" ? why : JSON.stringify(why));
   }
+  return body;
 }
 
-/* -- 3b. the live session -------------------------------------------- */
-/* One timer, started when a session starts and cleared when it ends. A page
-   left open on a finished session should not keep asking. */
-let LIVE_LIMIT = 60;
-let liveId = "";
-let liveTimer = null;
-let liveAudioFor = "";
+function say(text, bad) {
+  const el = $("status");
+  el.textContent = text || "";
+  el.className = "status" + (bad ? " bad" : "");
+}
 
-const PHASE_CLASS = {
-  resolving: "waiting", connecting: "waiting", starting: "waiting",
-  listening: "going", finishing: "ended", done: "ended", failed: "broke",
-};
-const PHASE_WORDS = {
-  resolving: "finding the stream",
-  connecting: "opening the session",
-  starting: "the model is starting up",
-  listening: "translating",
-  finishing: "finishing the last sentence",
-  done: "finished",
-  failed: "failed",
+// ---------------------------------------------------------------------
+// 1. The source
+// ---------------------------------------------------------------------
+// The quality engine's own words, shortened: this is a picker, and the full
+// dashboard is one click away on /qc.
+const STATE_WORD = {
+  commentary: "Commentary",
+  filler: "Holding clip",
+  silent: "Silent",
+  quiet: "Very quiet",
+  starting: "Starting up",
+  waiting: "Claimed, not started",
+  unwatched: "On air, not measured",
+  checking: "Checking",
+  down: "Off air",
 };
 
-async function startLive() {
-  const status = el("live-status");
-  el("go-live").disabled = true;
-  status.className = "status";
-  status.textContent = "Opening a session\u2026";
-  el("live-warn").innerHTML = "";
-  try {
-    const r = await fetch(`/api/translate/${MODE}/live`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        channel: el("channel").value,
-        target: el("target").value,
-        seconds: Number(el("live-seconds").value) || LIVE_LIMIT,
-      }),
-    });
-    const body = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(body.detail || r.statusText);
-    liveId = body.id;
-    liveAudioFor = "";
-    el("stop-live").hidden = false;
-    paintLive(body);
-    if (liveTimer) clearInterval(liveTimer);
-    liveTimer = setInterval(pollLive, 1500);
-  } catch (e) {
-    status.className = "status err";
-    status.textContent = String(e.message || e);
-    el("go-live").disabled = false;
-  }
+// What fits in a pill. The long form stays in the "what is on it" column,
+// where there is room for it.
+const SHORT_STATE = {
+  commentary: "Live", filler: "Clip", silent: "Silent", quiet: "Quiet",
+  starting: "Starting", waiting: "Claimed", unwatched: "Unwatched",
+  checking: "Checking", down: "Off air",
+};
+
+// Which severity stripe a row gets. Three classes, because a stripe is a
+// coarse signal: good, hesitate, do not.
+function rowClass(r) {
+  if (!r.live) return "";
+  if (r.fault || r.state === "silent") return "s-bad";
+  if (r.state === "filler") return "s-filler";
+  if (r.state === "commentary") return "s-commentary";
+  return "";
 }
 
-async function stopLive() {
-  if (!liveId) return;
-  el("stop-live").disabled = true;
-  try {
-    const r = await fetch(
-      `/api/translate/${MODE}/live/${encodeURIComponent(liveId)}/stop`,
-      { method: "POST" });
-    if (r.ok) paintLive(await r.json());
-  } catch (e) {
-    /* the next poll shows whatever actually happened */
-  } finally {
-    el("stop-live").disabled = false;
-  }
+function stateChip(r) {
+  if (!r.live) return `<span class="chip bare">Off air</span>`;
+  if (r.fault) return `<span class="chip bad">${esc(r.fault)}</span>`;
+  if (r.state === "commentary") return `<span class="chip ok">Live</span>`;
+  if (r.state === "filler") return `<span class="chip warn">Clip</span>`;
+  if (r.state === "silent") return `<span class="chip bad">Silent</span>`;
+  return `<span class="chip bare">${esc(SHORT_STATE[r.state] || "Unknown")}</span>`;
 }
 
-async function pollLive() {
-  try {
-    const d = await get(`/api/translate/${MODE}/live?id=${encodeURIComponent(liveId)}`);
-    if (d.live) paintLive(d.live);
-    else endLive();
-  } catch (e) {
-    el("live-status").className = "status err";
-    el("live-status").textContent =
-      "Lost contact with the server: " + (e.message || e);
-    endLive();
-  }
-}
+function drawChannels() {
+  const liveOnly = $("only-live").checked;
+  const talkingOnly = $("only-talking").checked;
+  const rows = state.channels.filter((r) => {
+    if (liveOnly && !r.live) return false;
+    if (talkingOnly && r.state !== "commentary") return false;
+    return true;
+  });
 
-function endLive() {
-  if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
-  el("go-live").disabled = false;
-  el("stop-live").hidden = true;
-  loadCredits().catch(() => {});
-  loadHistory().catch(() => {});
-}
+  const live = state.channels.filter((r) => r.live).length;
+  const talking = state.channels.filter((r) => r.state === "commentary").length;
+  $("src-count").textContent =
+    `${live} on air · ${talking} on commentary · ${state.channels.length} total`;
 
-function paintLive(s) {
-  const cls = PHASE_CLASS[s.phase] || "waiting";
-  const word = PHASE_WORDS[s.phase] || s.phase;
-  const st = el("live-status");
-  st.className = "status";
-  st.innerHTML =
-    `<span class="phase ${cls}${s.running && cls === "waiting" ? " pulse" : ""}">` +
-    `${esc(word)}</span> ` +
-    `<span class="sub">${esc(s.channel)} &middot; ${esc(s.elapsed_s)}s of ` +
-    `${esc(s.limit_s)}s` +
-    `${s.sent_seconds ? ` &middot; ${esc(s.sent_seconds)}s sent` : ""}` +
-    `${s.spoken_seconds ? ` &middot; ${esc(s.spoken_seconds)}s back` : ""}</span>`;
-  if (s.error) {
-    st.innerHTML += `<br><span style="color:var(--bad)">${esc(s.error)}</span>`;
-  }
-  el("live-warn").innerHTML = s.language_warning
-    ? `<p class="warn-box">${esc(s.language_warning)}</p>` : "";
-  showLive(s);
-  if (!s.running) endLive();
-}
+  const head = `<div class="chrow head">
+      <span></span><span>Channel</span><span>What is on it</span>
+      <span class="lvl">LUFS</span><span class="st">State</span>
+    </div>`;
 
-/* The audio elements are built once per session rather than on every poll:
-   reassigning src would restart playback from the beginning every second and
-   a half, which makes a live translation impossible to actually listen to. */
-function showLive(s) {
-  const base = `/api/translate/${MODE}/live/${encodeURIComponent(s.id)}/audio`;
-  if (liveAudioFor !== s.id) {
-    liveAudioFor = s.id;
-    el("listen").innerHTML = `
-      <div class="pair">
-        <div class="side">
-          <h4>What went in<span class="lang">${esc(s.source_language)}</span></h4>
-          <audio controls preload="none" src="${base}/heard"></audio>
-          <p class="note">The commentary as we received it.</p>
-        </div>
-        <div class="side">
-          <h4>What came back<span class="lang">${esc(s.target_language)}</span></h4>
-          <audio controls preload="none" src="${base}/spoken"></audio>
-          <p class="note">Reload the player to pick up what has arrived since.</p>
-        </div>
-      </div>
-      <div class="chips" id="live-chips"></div>
-      <div class="caps" id="live-caps"></div>
-      <div id="live-notes"></div>`;
-  }
-  const chips = el("live-chips");
-  if (chips) {
-    chips.innerHTML = [
-      `<span class="chip"><b>${esc(s.channel)}</b></span>`,
-      `<span class="chip">${esc(s.live_mode)} mode</span>`,
-      s.ready_s ? `<span class="chip">ready in <b>${esc(s.ready_s)}s</b></span>` : "",
-      s.first_audio_s
-        ? `<span class="chip">first words after <b>${esc(s.first_audio_s)}s</b></span>`
-        : "",
-      s.sent_seconds ? `<span class="chip">sent <b>${esc(s.sent_seconds)}s</b></span>` : "",
-      s.spoken_seconds
-        ? `<span class="chip">spoke <b>${esc(s.spoken_seconds)}s</b></span>` : "",
-    ].filter(Boolean).join("");
-  }
-  const caps = el("live-caps");
-  if (caps) {
-    const rows = (s.captions || []).slice().reverse();
-    caps.innerHTML = rows.length
-      ? rows.map((c) => `
-          <div class="cap">
-            <div class="t">${esc(c.at)}s</div>
-            <div class="h">${esc(c.heard || "\u2014")}</div>
-            <div class="s">${esc(c.said || "\u2014")}</div>
-          </div>`).join("")
-      : `<p class="sub" style="margin:8px 0 0">${
-          s.running ? "Waiting for the first sentence\u2026"
-                    : "Nothing was recognised in this audio."}</p>`;
-  }
-  const notes = el("live-notes");
-  if (notes) {
-    const lines = (s.notes || []).filter(Boolean);
-    notes.innerHTML = lines.length
-      ? `<p class="note">${lines.map(esc).join("<br>")}</p>` : "";
-  }
-}
-
-/* -- 1b. coverage ----------------------------------------------------- */
-const VERDICT = { yes: "\u2713", near: "\u2248", no: "\u2717", unknown: "?" };
-
-async function loadCoverage() {
-  const d = await get(`/api/translate/${MODE}/coverage`);
-  const head = `<thead><tr><th>Model</th>` +
-    d.targets.map((t) => `<th style="text-align:center">${esc(t)}</th>`).join("") +
-    `<th>Catalogue</th></tr></thead>`;
-  const body = d.providers.map((p) => `
-    <tr>
-      <td><b>${esc(p.title || p.provider)}</b>${
-        p.selectable ? "" : `<br><small style="color:var(--dim)">${esc(p.blocked || p.error)}</small>`
-      }</td>
-      ${d.targets.map((t) => {
-        const v = (p.targets || {})[t] || "unknown";
-        return `<td class="v v-${v}" title="${esc(v)}">${VERDICT[v] || "?"}</td>`;
-      }).join("")}
-      <td>${p.catalogue || "\u2014"}</td>
-    </tr>`).join("");
-  el("coverage").innerHTML = head + `<tbody>${body}</tbody>` +
-    `<tfoot><tr><td colspan="${d.targets.length + 2}">
-      <small style="color:var(--dim)">
-        \u2713 offered &nbsp; \u2248 offered in another locale, which is fine
-        &nbsp; \u2717 not offered &nbsp; ? could not ask
-      </small></td></tr></tfoot>`;
-}
-
-/* -- 3. the bench ------------------------------------------------------ */
-let BENCH_TARGETS = [];
-let benchId = "";
-let benchTimer = null;
-let benchDrawnFor = "";
-
-function judge() {
-  return (localStorage.getItem("qc-who") || "").trim();
-}
-
-function pickBoxes(host, items) {
-  el(host).innerHTML = items.map((it) => `
-    <label class="pick ${it.off ? "off" : ""}" title="${esc(it.title || "")}">
-      <input type="checkbox" value="${esc(it.value)}"
-        ${it.on ? "checked" : ""} ${it.off ? "disabled" : ""}>
-      <span>${esc(it.text)}</span>
-      ${it.note ? `<small>${esc(it.note)}</small>` : ""}
-    </label>`).join("");
-  el(host).querySelectorAll("input").forEach((b) => { b.onchange = estimate; });
-}
-
-function ticked(host) {
-  return Array.from(el(host).querySelectorAll("input:checked")).map((b) => b.value);
-}
-
-function estimate() {
-  const n = ticked("bench-providers").length * ticked("bench-targets").length;
-  const secs = Number(el("bench-seconds").value) || 15;
-  const total = n * secs;
-  el("bench-estimate").innerHTML = n
-    ? `${n} entr${n === 1 ? "y" : "ies"} &times; ${secs}s = ` +
-      `<b>${(total / 60).toFixed(2)} minutes</b> of audio sent, and billed, ` +
-      `by whichever of these charges.`
-    : `Pick at least one model and one language.`;
-  el("go-bench").disabled = n === 0;
-}
-
-async function startBench() {
-  const status = el("bench-status");
-  el("go-bench").disabled = true;
-  status.className = "status";
-  status.textContent = "Capturing the clip\u2026";
-  try {
-    const r = await fetch(`/api/translate/${MODE}/bench`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        channel: el("bench-channel").value,
-        seconds: Number(el("bench-seconds").value) || 15,
-        providers: ticked("bench-providers"),
-        targets: ticked("bench-targets"),
-        label: el("bench-label").value,
-      }),
-    });
-    const body = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(body.detail || r.statusText);
-    benchId = body.id;
-    benchDrawnFor = "";
-    paintBench(body);
-    if (benchTimer) clearInterval(benchTimer);
-    benchTimer = setInterval(pollBench, 2000);
-  } catch (e) {
-    status.className = "status err";
-    status.textContent = String(e.message || e);
-    estimate();
-  }
-}
-
-async function pollBench() {
-  try {
-    const d = await get(`/api/translate/${MODE}/bench?id=${encodeURIComponent(benchId)}`);
-    if (d.bench) paintBench(d.bench); else endBench();
-  } catch (e) {
-    el("bench-status").className = "status err";
-    el("bench-status").textContent = "Cannot reach the server: " + (e.message || e);
-    endBench();
-  }
-}
-
-function endBench() {
-  if (benchTimer) { clearInterval(benchTimer); benchTimer = null; }
-  estimate();
-  loadCredits().catch(() => {});
-  loadScoreboard().catch(() => {});
-}
-
-function paintBench(b) {
-  const done = (b.entries || []).filter((e) => e.run || e.error).length;
-  const st = el("bench-status");
-  st.className = b.phase === "failed" ? "status err" : "status";
-  st.innerHTML =
-    `<span class="phase ${b.running ? "waiting pulse" : (b.phase === "failed" ? "broke" : "ended")}">` +
-    `${esc(b.phase)}</span> <span class="sub">${esc(b.channel)} &middot; ` +
-    `${done}/${b.count} entries &middot; ${esc(b.elapsed_s)}s</span>` +
-    (b.error ? `<br><span style="color:var(--bad)">${esc(b.error)}</span>` : "");
-  showBench(b);
-  if (!b.running) endBench();
-}
-
-/* Built once per bench, then patched. Re-rendering the whole thing on each
-   poll would reset every <audio> element and wipe a half-typed note. */
-function showBench(b) {
-  const base = `/api/translate/${MODE}/bench/${encodeURIComponent(b.id)}`;
-  if (benchDrawnFor !== b.id) {
-    benchDrawnFor = b.id;
-    el("listen").innerHTML = `
-      <div class="side" style="margin:0 0 6px">
-        <h4>The clip every model heard
-          <span class="lang">${esc(b.source_language)}</span></h4>
-        <audio controls preload="none" src="${base}/audio/source"></audio>
-        ${b.label ? `<p class="note">${esc(b.label)}</p>` : ""}
-      </div>`;
-    el("bench-view").innerHTML = `
-      <div class="entries" id="entries"></div>
-      <div class="form" style="margin-top:16px;align-items:center">
-        <div style="flex:0 1 180px">
-          <label for="judge">Scoring as</label>
-          <input id="judge" type="text" style="width:100%" placeholder="your name">
-        </div>
-        <button id="go-reveal">Reveal which was which</button>
-        <p class="note" id="reveal-note" style="margin:0"></p>
-      </div>`;
-    el("judge").value = judge();
-    el("judge").oninput = () => localStorage.setItem("qc-who", el("judge").value);
-    el("go-reveal").onclick = () => revealBench(b.id);
+  if (!rows.length) {
+    $("channels").innerHTML = head + `<div class="empty">Nothing matches. ` +
+      `${live ? "" : "No MMC channel is broadcasting at the moment. "}` +
+      `Untick the filters to see the whole list.</div>`;
+    return;
   }
 
-  const best = Math.max(0, ...(b.entries || []).map((e) =>
-    (e.scores || []).reduce((a, s) => a + s.score, 0) / ((e.scores || []).length || 1)));
-  el("entries").innerHTML = (b.entries || []).map((e) => {
-    const scores = e.scores || [];
-    const mean = scores.length
-      ? scores.reduce((a, s) => a + s.score, 0) / scores.length : null;
-    const mine = scores.find((s) => s.who === judge());
-    const cand = e.candidate || {};
-    return `
-      <div class="entry ${b.revealed && mean !== null && mean === best && best > 0 ? "top" : ""}">
-        <h4><span class="tagline">${esc(e.label)}</span>
-            <span class="lang">${esc(e.target)}</span></h4>
-        ${e.has_audio
-          ? `<audio controls preload="none"
-               src="/api/translate/${MODE}/audio/${encodeURIComponent(e.run_id)}/spoken"></audio>`
-          : ""}
-        <blockquote class="${e.text ? "" : "empty"}">${
-          esc(e.text || e.error || (e.run ? "nothing came back" : "still running\u2026"))
-        }</blockquote>
-        ${e.run_id ? `
-          <div class="who" data-run="${esc(e.run_id)}">
-            ${[1, 2, 3, 4, 5].map((n) =>
-              `<button data-score="${n}" class="${mine && mine.score === n ? "mine" : ""}"
-                 title="${n} of 5">${n}</button>`).join("")}
-          </div>
-          <p class="said">${
-            scores.length
-              ? `mean <b>${mean.toFixed(1)}</b> from ${scores.length} &mdash; ` +
-                scores.map((x) => esc(x.who) + " " + x.score).join(", ")
-              : "not judged yet"
-          }</p>` : ""}
-        ${b.revealed && cand.provider
-          ? `<p class="reveal-name">${esc(cand.provider)}</p>` : ""}
-      </div>`;
+  $("channels").innerHTML = head + rows.map((r) => {
+    const bits = [];
+    if (r.match) bits.push(esc(r.match));
+    else if (r.claimed_by) bits.push(esc(r.claimed_by) + " claimed it");
+    else bits.push(esc(STATE_WORD[r.state] || r.state || "unknown"));
+    if (r.language) bits.push(esc(r.language));
+    const lufs = (r.lufs === null || r.lufs === undefined)
+      ? "—" : r.lufs.toFixed(1);
+    return `<button class="chrow ${rowClass(r)} ${r.channel === state.channel ? "on" : ""}"
+              data-ch="${esc(r.channel)}" ${r.live ? "" : "disabled"}>
+      <span class="stripe"></span>
+      <span class="name truncate">${esc(r.short || r.channel)}</span>
+      <span class="what">${bits.join(" · ")}</span>
+      <span class="lvl">${lufs}</span>
+      <span class="st">${stateChip(r)}</span>
+    </button>`;
   }).join("");
 
-  el("entries").querySelectorAll(".who button").forEach((btn) => {
-    btn.onclick = () => score(b.id, btn.closest(".who").dataset.run,
-                              Number(btn.dataset.score));
+  $("channels").querySelectorAll(".chrow[data-ch]").forEach((btn) => {
+    btn.onclick = () => { state.channel = btn.dataset.ch; afterChoice(); };
   });
-  el("reveal-note").textContent = b.revealed
-    ? "Revealed. The scores above were given blind."
-    : "Score everything first \u2014 this cannot be undone.";
-  el("go-reveal").disabled = b.revealed;
 }
 
-async function score(id, runId, value) {
-  const who = judge();
-  if (!who) {
-    el("reveal-note").textContent = "Put your name in first, so the bench has a record.";
-    el("judge").focus();
-    return;
-  }
+async function loadChannels() {
   try {
-    const r = await fetch(`/api/translate/${MODE}/bench/${encodeURIComponent(id)}/score`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ run_id: runId, who: who, score: value }),
-    });
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
-    await pollBench();
-    await loadScoreboard();
+    const data = await api(`${API}/channels`);
+    state.channels = data.channels || [];
+    drawChannels();
   } catch (e) {
-    el("reveal-note").textContent = String(e.message || e);
+    $("channels").innerHTML =
+      `<div class="empty" style="color:var(--bad)">Cannot reach the server: ${esc(e.message)}</div>`;
   }
 }
 
-async function revealBench(id) {
-  try {
-    const r = await fetch(`/api/translate/${MODE}/bench/${encodeURIComponent(id)}/reveal`,
-                          { method: "POST" });
-    if (r.ok) paintBench(await r.json());
-    await loadScoreboard();
-  } catch (e) { /* the poll will catch up */ }
-}
-
-/* -- 5. the scoreboard ------------------------------------------------- */
-async function loadScoreboard() {
-  const d = await get(`/api/translate/${MODE}/scoreboard`);
-  const table = el("scoreboard");
-  if (!d.rows.length) {
-    table.innerHTML = `<tbody><tr><td><span class="sub">
-      Nothing judged yet. Run a comparison and score the entries.
-    </span></td></tr></tbody>`;
-    return;
-  }
-  table.innerHTML =
-    `<thead><tr><th>Model</th><th>Into</th><th>Score</th><th>Judged by</th>
-      <th>Worked</th><th>Took</th></tr></thead><tbody>` +
-    d.rows.map((r) => `
-      <tr>
-        <td><b>${esc(r.provider)}</b><br>
-            <small style="color:var(--dim)">${esc(r.model || "")}</small></td>
-        <td>${esc(r.target)}</td>
-        <td class="v">${r.mean_score == null
-          ? `<span style="color:var(--dim)">\u2014</span>`
-          : `<b style="color:var(--yellow)">${r.mean_score.toFixed(1)}</b>`}</td>
-        <td>${r.judgements || 0}</td>
-        <td class="${r.failed ? "v-no" : "v-yes"}">${r.ok || 0}/${r.runs || 0}</td>
-        <td>${esc(r.mean_s)}s</td>
-      </tr>`).join("") + `</tbody>`;
-}
-
-/* -- 4. listen ------------------------------------------------------- */
-function show(run) {
-  const base = `/api/translate/${MODE}/audio/${encodeURIComponent(run.id)}`;
-  const side = (title, lang, has, which, text, missing) => `
-    <div class="side">
-      <h4>${title}<span class="lang">${esc(lang || "?")}</span></h4>
-      ${has ? `<audio controls preload="none" src="${base}/${which}"></audio>`
-            : `<p class="sub" style="margin:0 0 8px">no audio kept</p>`}
-      <blockquote class="${text ? "" : "empty"}">${esc(text || missing)}</blockquote>
-    </div>`;
-  el("listen").innerHTML = `
-    <div class="pair">
-      ${side("What it heard", run.source_language, run.has_heard, "heard",
-             run.source_text, "nothing was recognised in this audio")}
-      ${side("What it said", run.target_language, run.has_spoken, "spoken",
-             run.target_text, "nothing was produced")}
-    </div>
-    <div class="chips">
-      <span class="chip"><b>${esc(run.channel)}</b></span>
-      <span class="chip">clip <b>${esc(run.seconds)}s</b></span>
-      <span class="chip">hear <b>${esc(run.transcribe_s)}s</b></span>
-      <span class="chip">translate <b>${esc(run.translate_s)}s</b></span>
-      <span class="chip">speak <b>${esc(run.speak_s)}s</b></span>
-      <span class="chip">total <b>${esc(run.total_s)}s</b></span>
-      ${run.credits ? `<span class="chip">cost <b>${esc(run.credits)}</b></span>` : ""}
-      ${run.voice ? `<span class="chip">voice <b>${esc(run.voice)}</b></span>` : ""}
-      ${(run.gaps || []).length
-        ? `<span class="chip" style="color:var(--warn)">stream gap while capturing</span>` : ""}
-    </div>
-    ${run.error ? `<p class="status err">${esc(run.error)}</p>` : ""}
-  `;
-}
-
-function stateClass(s) {
-  if (s === "ok") return "ok";
-  if (s === "skipped" || s === "empty") return "skip";
-  return "bad";
-}
-
-async function loadHistory() {
-  const d = await get(`/api/translate/${MODE}/runs?limit=12`);
-  const table = el("history"), body = table.querySelector("tbody");
-  if (!d.runs.length) { table.hidden = true; return; }
-  table.hidden = false;
-  body.innerHTML = d.runs.map((r) => `
-    <tr data-id="${esc(r.id)}">
-      <td>${esc(fmtAgo(r.created))}</td>
-      <td>${esc(r.channel || "-")}</td>
-      <td>${esc((r.source_text || "").slice(0, 42) || "-")}</td>
-      <td>${esc((r.target_text || "").slice(0, 42) || "-")}</td>
-      <td>${esc(r.total_s)}s</td>
-      <td class="st ${stateClass(r.status)}">${esc(r.status)}</td>
-    </tr>`).join("");
-  body.querySelectorAll("tr").forEach((row) => {
-    row.onclick = () => {
-      const run = d.runs.find((x) => x.id === row.dataset.id);
-      if (run) { show(run); el("listen").scrollIntoView({ block: "center" }); }
+// ---------------------------------------------------------------------
+// 2. The model
+// ---------------------------------------------------------------------
+function drawModels() {
+  $("models").innerHTML = state.providers.map((p) => `
+    <button class="modelcard ${p.name === state.provider ? "on" : ""}"
+            data-p="${esc(p.name)}" ${p.selectable ? "" : "disabled"}>
+      <span class="top">
+        <h3>${esc(p.title || p.name)}</h3>
+        ${p.blocked ? `<span class="chip bad">Needs a key</span>`
+                    : `<span class="chip bare">${esc(p.cost || "")}</span>`}
+      </span>
+      <p>${esc(p.detail || "")}</p>
+      ${p.blocked ? `<p style="color:var(--bad)"><span class="mono">${esc(p.blocked)}</span></p>` : ""}
+    </button>`).join("");
+  $("models").querySelectorAll(".modelcard").forEach((btn) => {
+    btn.onclick = () => {
+      state.provider = btn.dataset.p;
+      state.targets = [];
+      drawModels();
+      loadLanguages().then(afterChoice);
     };
   });
+  const chosen = state.providers.find((p) => p.name === state.provider);
+  $("model-picked").textContent = chosen ? chosen.title : "";
+  const real = state.providers.filter((p) => p.cost !== "free" && p.selectable);
+  $("model-note").innerHTML = (chosen && chosen.name === "mock")
+    ? `<div class="note warn">The offline stand-in is running. It chimes once
+       per word, and the words come from a fixed football vocabulary picked by
+       hashing the audio. <b>It is not listening and it is not translating.</b>
+       ${real.length ? "" : "Put a key in <span class=\"mono\">.translate.env</span> to use a real model."}</div>`
+    : "";
 }
 
-/* -- start ----------------------------------------------------------- */
-function tab(which) {
-  for (const name of ["bench", "live", "clip"]) {
-    el("tab-" + name).classList.toggle("on", name === which);
-    el("pane-" + name).hidden = name !== which;
-  }
-}
-el("tab-bench").onclick = () => tab("bench");
-el("tab-live").onclick = () => tab("live");
-el("tab-clip").onclick = () => tab("clip");
-el("go-bench").onclick = startBench;
-el("bench-seconds").oninput = estimate;
-el("go-live").onclick = startLive;
-el("stop-live").onclick = stopLive;
-el("go").onclick = runOnce;
-
-/* A session already running when the page opens -- after a reload, or in a
-   second tab -- is adopted rather than ignored. Without this, the obvious
-   next move is to press Start and be told the one slot is already taken. */
-async function adoptRunningSession() {
+async function loadModel() {
   try {
-    const d = await get(`/api/translate/${MODE}/live`);
-    if (d.live && d.live.running) {
-      liveId = d.live.id;
-      el("stop-live").hidden = false;
-      el("go-live").disabled = true;
-      paintLive(d.live);
-      liveTimer = setInterval(pollLive, 1500);
+    const data = await api(`${API}/model`);
+    state.providers = data.providers || [];
+    if (!state.provider) {
+      const pick = state.providers.find((p) => p.selected && p.selectable)
+                || state.providers.find((p) => p.selectable);
+      state.provider = pick ? pick.name : "";
     }
-  } catch (e) { /* the page is still usable without it */ }
-}
-(async () => {
-  try {
-    await loadModes();
-    await Promise.all([loadModel(), loadCredits(), loadChannels(), loadHistory()]);
-    const bench = await get(`/api/translate/${MODE}/bench`);
-    BENCH_TARGETS = bench.targets || [];
-    pickBoxes("bench-targets", BENCH_TARGETS.map((t) => ({
-      value: t, text: t, on: t !== "en-us",
-    })));
-    estimate();
-    await Promise.all([loadCoverage(), loadScoreboard()]);
-    if (bench.bench && bench.bench.running) {
-      benchId = bench.bench.id;
-      paintBench(bench.bench);
-      benchTimer = setInterval(pollBench, 2000);
-    }
-    await adoptRunningSession();
+    $("seconds").value = Math.round((data.live && data.live.seconds) || 60);
+    drawModels();
   } catch (e) {
-    el("live-status").className = "status err";
-    el("live-status").textContent = "Cannot reach the server: " + (e.message || e);
+    $("models").innerHTML = `<div class="note bad">Cannot read the models: ${esc(e.message)}</div>`;
   }
+}
+
+// ---------------------------------------------------------------------
+// 3. The languages
+// ---------------------------------------------------------------------
+// What MMC actually broadcasts in, so the relevant choices come first. The
+// full list a model carries is long and mostly beside the point here.
+const MMC_LANGS = [
+  ["el-gr", "Greek"], ["de-de", "German"], ["it-it", "Italian"],
+  ["pt-pt", "Portuguese"], ["fr-fr", "French"], ["en-us", "English"],
+];
+
+function sameLanguage(a, b) {
+  return String(a || "").split("-")[0] === String(b || "").split("-")[0];
+}
+
+function carried(tag) {
+  const tags = state.languages.tags || [];
+  // An empty list means the model has not said, which is not a refusal --
+  // one vendor's catalogue is fetched and another's is published prose.
+  // Permit it and let the run report the truth.
+  if (!tags.length) return true;
+  return tags.some((t) => sameLanguage(t, tag));
+}
+
+function drawLanguages() {
+  const cap = state.limits.targets || 4;
+  $("langs").innerHTML = MMC_LANGS.map(([tag, name]) => {
+    const ok = carried(tag);
+    const on = state.targets.includes(tag);
+    const full = !on && state.targets.length >= cap;
+    const why = ok ? (full ? `${cap} languages at a time` : "")
+                   : "this model does not list it for live translation";
+    return `<button class="langbtn ${on ? "on" : ""}" data-t="${tag}"
+              ${ok && !full ? "" : "disabled"} title="${esc(why)}">
+      <span>${esc(name)}</span><span class="t">${tag}</span></button>`;
+  }).join("");
+  $("langs").querySelectorAll(".langbtn").forEach((btn) => {
+    btn.onclick = () => {
+      const tag = btn.dataset.t;
+      state.targets = state.targets.includes(tag)
+        ? state.targets.filter((t) => t !== tag)
+        : [...state.targets, tag];
+      drawLanguages();
+      afterChoice();
+    };
+  });
+
+  const n = state.targets.length;
+  const secs = Number($("seconds").value) || state.limits.seconds || 60;
+  $("lang-picked").textContent = n
+    ? state.targets.map((t) => (MMC_LANGS.find((l) => l[0] === t) || [t, t])[1]).join(" + ")
+    : "";
+
+  // The cost shape, as three figures rather than a sentence: what is pulled,
+  // what is charged, and the multiplier between them. That relationship is
+  // the whole point of the shared pull, so it gets the page's one big size.
+  $("cost-panel").classList.toggle("hide", !n);
+  $("lang-cost").innerHTML = n ? `
+    <div class="field"><span class="label">Languages</span>
+      <span class="v big">${n}</span></div>
+    <div class="field"><span class="label">Audio pulled</span>
+      <span class="v big">${secs}s</span></div>
+    <div class="field"><span class="label">Audio charged</span>
+      <span class="v big" style="color:var(--accent)">${n * secs}s</span></div>
+    <div class="field"><span class="label">Sessions on the model</span>
+      <span class="v quiet">${n} × ${secs}s</span></div>` : "";
+
+  const missing = MMC_LANGS.filter(([t]) => !carried(t)).map(([, name]) => name);
+  const bits = [];
+  if (missing.length) {
+    bits.push(`<div class="note warn">This model does not list
+      ${missing.join(", ")} for live translation, so
+      ${missing.length === 1 ? "it is" : "they are"} struck through above.</div>`);
+  }
+  if (state.languages.note) {
+    bits.push(`<div class="note">${esc(state.languages.note)}</div>`);
+  }
+  $("lang-note").innerHTML = bits.join("");
+}
+
+async function loadLanguages() {
+  try {
+    const q = state.provider ? `?provider=${encodeURIComponent(state.provider)}` : "";
+    const data = await api(`${API}/live/group${q}`);
+    state.languages = data.languages || { tags: [] };
+    state.limits = Object.assign(state.limits, data.limits || {});
+    // The last run is adopted whether or not it is still going. The point
+    // of this page is listening to the result and deciding, and a refresh
+    // that threw away the thing you were about to judge is the one
+    // behaviour nobody would forgive.
+    if (data.group) {
+      adopt(data.group);
+      if (data.group.running) poll();
+    }
+  } catch (e) {
+    state.languages = { tags: [], note: "" };
+  }
+  drawLanguages();
+}
+
+// ---------------------------------------------------------------------
+// 4. Listening
+// ---------------------------------------------------------------------
+function afterChoice() {
+  drawChannels();
+  drawLanguages();
+  const row = state.channels.find((c) => c.channel === state.channel);
+  $("src-picked").textContent = row
+    ? `${row.short || row.channel}${row.match ? " — " + row.match : ""}` : "";
+  $("step-source").classList.toggle("done", !!state.channel);
+  $("step-model").classList.toggle("done", !!state.provider);
+  $("step-langs").classList.toggle("done", state.targets.length > 0);
+  $("step-listen").classList.toggle("done", !!(state.group && state.group.running));
+
+  const running = !!(state.group && state.group.running);
+  $("go").disabled = running || !state.channel || !state.provider
+                  || !state.targets.length;
+  if (!running && !state.channel) say("Pick a channel that is on air.");
+  else if (!running && !state.targets.length) say("Pick at least one language.");
+  else if (!running) say("");
+}
+
+async function start() {
+  say("Opening a session per language…");
+  $("go").disabled = true;
+  try {
+    const data = await api(`${API}/live/group`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        channel: state.channel,
+        targets: state.targets,
+        provider: state.provider,
+        seconds: Number($("seconds").value) || undefined,
+      }),
+    });
+    state.players.clear();
+    $("live").innerHTML = "";
+    adopt(data);
+    say("");
+    poll();
+  } catch (e) {
+    say(e.message, true);
+    afterChoice();
+  }
+}
+
+async function stop() {
+  if (!state.group) return;
+  say("Winding up — each language still collects its last sentence…");
+  try {
+    await api(`${API}/live/group/${state.group.id}/stop`, { method: "POST" });
+  } catch (e) { say(e.message, true); }
+}
+
+function adopt(group) {
+  state.group = group;
+  $("stop").classList.toggle("hide", !group.running);
+  drawLive();
+}
+
+function poll() {
+  if (state.polling) clearInterval(state.polling);
+  state.polling = setInterval(async () => {
+    try {
+      const data = await api(`${API}/live/group?id=${encodeURIComponent(state.group.id)}`);
+      if (!data.group) return;
+      adopt(data.group);
+      if (!data.group.running) {
+        clearInterval(state.polling);
+        state.polling = null;
+        afterChoice();
+        say(data.group.error ? data.group.error : "Finished.",
+            !!data.group.error);
+      }
+    } catch (e) {
+      say(`Cannot reach the server: ${e.message}`, true);
+    }
+  }, 1500);
+}
+
+// -- drawing a running session ---------------------------------------
+const PHASE_WORD = {
+  resolving: "Finding the stream", connecting: "Connecting",
+  starting: "Model starting", listening: "Translating",
+  finishing: "Finishing", done: "Done", failed: "Failed",
+};
+
+function phaseChip(phase) {
+  const cls = phase === "failed" ? "bad"
+            : phase === "done" ? "bare"
+            : phase === "listening" ? "ok" : "warn";
+  const pulse = phase === "listening" ? " pulse" : "";
+  return `<span class="chip ${cls}${pulse}">${esc(PHASE_WORD[phase] || phase)}</span>`;
+}
+
+function identityPanel(ident) {
+  if (!ident) return "";
+  const lang = ident.language || {};
+  const match = ident.match || {};
+  const warn = ident.warning;
+  const heard = ident.heard_words || 0;
+
+  return `<div class="panel" style="margin-top:var(--s2)">
+    <div class="panel-head">
+      <span class="label grow">What the commentary says this channel is</span>
+      <span class="chip bare"><span class="mono">${heard}</span>&nbsp;words heard</span>
+    </div>
+    <div class="panel-body">
+      <div class="strip">
+        <div class="field">
+          <span class="label">Language heard</span>
+          <span class="v ${lang.name ? "" : "quiet"}">${esc(lang.name || "Not yet")}</span>
+        </div>
+        <div class="field">
+          <span class="label">Channel is listed as</span>
+          <span class="v quiet">${esc(ident.configured || "not stated")}</span>
+        </div>
+        <div class="field" style="flex:1 1 240px">
+          <span class="label">Match recognised</span>
+          <span class="v ${match.name ? "" : "quiet"}">${esc(match.name || "Not yet")}</span>
+        </div>
+      </div>
+      ${warn ? `<div class="note warn" style="margin-top:var(--s3)">${esc(warn)}</div>` : ""}
+      ${match.name && !match.both_sides
+        ? `<div class="note" style="margin-top:var(--s3)">Only one team has been
+           named so far, so this may be the right club in the wrong
+           fixture.</div>` : ""}
+      ${!match.name && match.considered
+        ? `<div class="note" style="margin-top:var(--s3)">Nothing recognised yet
+           in <span class="mono">${match.considered}</span> of today's
+           fixtures.</div>` : ""}
+      ${!warn && lang.name && heard >= 12
+        ? `<div class="note ok" style="margin-top:var(--s3)">The language heard
+           agrees with how the channel is listed.</div>` : ""}
+    </div>
+  </div>`;
+}
+
+function legBlock(leg, group) {
+  const name = (MMC_LANGS.find((l) => l[0] === leg.target_language)
+             || [leg.target_language, leg.target_language])[1];
+  const audioUrl = `${API}/live/${leg.id}/audio`;
+  const key = leg.id;
+
+  let box = state.players.get(key);
+  if (!box) {
+    box = document.createElement("div");
+    box.className = "panel leg";
+    box.innerHTML = `
+      <div class="panel-head">
+        <span class="lname">${esc(name)}</span>
+        <span class="mono" style="font-size:var(--fs-xs);color:var(--fg-3)">${esc(leg.target_language)}</span>
+        <span class="grow"></span>
+        <span data-num class="mono" style="font-size:var(--fs-xs);color:var(--fg-3)"></span>
+        <span data-ph></span>
+      </div>
+      <div class="players">
+        <div><span class="label">The commentary, as it went in</span>
+          <audio controls preload="none" data-heard src="${audioUrl}/heard"></audio></div>
+        <div><span class="label">The translation, as it came back</span>
+          <audio controls preload="none" data-spoken src="${audioUrl}/spoken"></audio></div>
+      </div>
+      <div data-fake></div>
+      <div class="script" data-script></div>`;
+    state.players.set(key, box);
+    $("live").appendChild(box);
+
+    // The highlight follows the commentary player, because that one's
+    // timeline is the run's: it is a continuous pull, so a caption at 12.4s
+    // really is 12.4s into that file. The translated side is only the
+    // moments the model was speaking, concatenated, so its clock is not the
+    // same clock and pretending otherwise would drift.
+    const heard = box.querySelector("[data-heard]");
+    heard.addEventListener("timeupdate", () => highlight(box, heard.currentTime));
+    heard.addEventListener("seeked", () => highlight(box, heard.currentTime));
+  }
+
+  box.querySelector("[data-ph]").innerHTML = phaseChip(leg.phase);
+  const delay = leg.first_audio_s ? `first voice +${leg.first_audio_s.toFixed(1)}s` : "";
+  box.querySelector("[data-num]").textContent = [
+    `${(leg.spoken_seconds || 0).toFixed(1)}s spoken`, delay,
+  ].filter(Boolean).join("   ");
+
+  const isMock = /mock|stand-in|offline/i.test(group.model || state.provider || "");
+  box.querySelector("[data-fake]").innerHTML = isMock
+    ? `<div class="note warn" style="margin:0;border-left-width:2px;border-radius:0">
+       These words are not a transcription. The offline stand-in picks them
+       from a football vocabulary by hashing the audio.</div>`
+    : "";
+
+  const caps = leg.captions || [];
+  const script = box.querySelector("[data-script]");
+  if (script.dataset.n !== String(caps.length)) {
+    script.dataset.n = String(caps.length);
+    const head = `<div class="tline head">
+        <span>At</span><span>Heard</span><span>Said</span></div>`;
+    script.innerHTML = caps.length ? head + caps.map((c) => `
+      <div class="tline" data-at="${c.at}">
+        <span class="t">${Number(c.at).toFixed(1)}s</span>
+        <span class="h">${esc(c.heard)}</span>
+        <span class="s">${esc(c.said)}</span>
+      </div>`).join("")
+      : `<div class="empty">Nothing said yet. ${leg.phase === "listening"
+           ? "Waiting for the first phrase."
+           : esc(PHASE_WORD[leg.phase] || leg.phase)}.</div>`;
+    if (leg.running) {
+      // While it is live the newest line is the interesting one.
+      const lines = script.querySelectorAll(".tline[data-at]");
+      if (lines.length) {
+        lines.forEach((l) => l.classList.remove("now"));
+        lines[lines.length - 1].classList.add("now");
+        script.scrollTop = script.scrollHeight;
+      }
+    }
+  }
+  if (leg.error) {
+    let err = box.querySelector("[data-err]");
+    if (!err) {
+      err = document.createElement("div");
+      err.setAttribute("data-err", "");
+      box.appendChild(err);
+    }
+    err.innerHTML = `<div class="note bad" style="margin:0;border-radius:0">${esc(leg.error)}</div>`;
+  }
+  return box;
+}
+
+function highlight(box, seconds) {
+  const lines = [...box.querySelectorAll(".tline[data-at]")];
+  if (!lines.length) return;
+  let current = null;
+  for (const line of lines) {
+    if (Number(line.dataset.at) <= seconds + 0.25) current = line;
+  }
+  lines.forEach((l) => l.classList.toggle("now", l === current));
+  if (current) {
+    const script = box.querySelector(".script");
+    const top = current.offsetTop - script.offsetTop;
+    if (top < script.scrollTop || top > script.scrollTop + script.clientHeight - 40) {
+      script.scrollTop = Math.max(0, top - script.clientHeight / 2);
+    }
+  }
+}
+
+function drawLive() {
+  const g = state.group;
+  if (!g) { $("live").innerHTML = ""; return; }
+
+  const left = Math.max(0, (g.limit_s || 0) - (g.elapsed_s || 0));
+  const pull = (g.pull || [])[0] || {};
+  const meter = `<div class="panel">
+    <div class="panel-head">
+      <span class="mono" style="font-weight:600">${esc(g.channel)}</span>
+      <span class="label">${(g.targets || []).length} languages</span>
+      <span class="grow"></span>
+      ${g.running ? `<span class="chip ok pulse">Running</span>`
+                  : `<span class="chip bare">Finished</span>`}
+    </div>
+    <div class="panel-body">
+      <div class="strip">
+        <div class="field"><span class="label">Elapsed</span>
+          <span class="v big">${(g.elapsed_s || 0).toFixed(0)}s</span></div>
+        <div class="field"><span class="label">${g.running ? "Stops in" : "Limit was"}</span>
+          <span class="v big ${g.running ? "" : "quiet"}">${g.running ? left.toFixed(0) : (g.limit_s || 0).toFixed(0)}s</span></div>
+        <div class="field"><span class="label">Pulled once</span>
+          <span class="v big">${(g.sent_seconds || 0).toFixed(0)}s</span></div>
+        <div class="field"><span class="label">Charged</span>
+          <span class="v big" style="color:var(--accent)">${(g.billed_seconds || 0).toFixed(0)}s</span></div>
+        ${pull.listeners !== undefined ? `<div class="field"><span class="label">Listeners on one pull</span>
+          <span class="v quiet">${pull.listeners} of ${pull.expected ?? pull.listeners}</span></div>` : ""}
+        ${pull.dropped ? `<div class="field"><span class="label">Audio dropped</span>
+          <span class="v" style="color:var(--warn)">${pull.dropped}</span></div>` : ""}
+      </div>
+    </div>
+  </div>`;
+
+  // The meter and the identity panel are rebuilt freely; the legs are not,
+  // because each one owns two audio elements that must survive a poll.
+  let head = $("live").querySelector("[data-head]");
+  if (!head) {
+    head = document.createElement("div");
+    head.setAttribute("data-head", "");
+    $("live").prepend(head);
+  }
+  head.innerHTML = meter + identityPanel(g.identity)
+    + (g.error ? `<div class="note bad" style="margin-top:var(--s2)">${esc(g.error)}</div>` : "");
+
+  for (const leg of g.legs || []) legBlock(leg, g);
+  $("go").disabled = !!g.running;
+  $("stop").classList.toggle("hide", !g.running);
+}
+
+// ---------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------
+$("only-live").onchange = drawChannels;
+$("only-talking").onchange = drawChannels;
+$("go").onclick = start;
+$("stop").onclick = stop;
+$("seconds").oninput = drawLanguages;
+
+(async function boot() {
+  try {
+    const modes = await api(`/api/translate/modes`);
+    const built = (modes.modes || []).find((m) => m.name === MODE);
+    $("standing-chip").textContent = built ? `${built.title} mode` : "Test mode";
+    // The mode states its own purpose, and shadow's already ends with
+    // "nothing is published". Appending our own version printed it twice.
+    $("standing").textContent =
+      (built && built.purpose)
+      || "Running in test mode. Nothing it produces is published.";
+  } catch (e) {
+    $("standing-chip").textContent = "Offline";
+    $("standing").textContent =
+      "Cannot reach the server — the page will not work until it is back.";
+  }
+  await loadModel();
+  await loadLanguages();
+  await loadChannels();
+  afterChoice();
+  // Keep the picker honest: channels go on and off air during a session, and
+  // a list that was true when the page loaded is what gets somebody
+  // translating a channel that stopped ten minutes ago.
+  setInterval(loadChannels, 20000);
 })();
 </script>
 </body>

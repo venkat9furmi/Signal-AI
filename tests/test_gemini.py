@@ -28,7 +28,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from commentary_qc.translate.adapters.gemini import protocol as gp  # noqa: E402
 from commentary_qc.translate.adapters.gemini.provider import (  # noqa: E402
+    GeminiLiveSession,
     GeminiProvider,
+    _close_parts,
 )
 from commentary_qc.translate.app.live import LiveRunner  # noqa: E402
 from commentary_qc.translate.core.models import (  # noqa: E402
@@ -618,6 +620,92 @@ def test_live_run(url: str, fake: FakeGemini) -> None:
           "gemini" in (run.run.model if run.run else ""), str(run.run and run.run.model))
 
 
+def test_a_startup_close_is_classified_by_its_reason() -> None:
+    """The race that made this suite fail about one run in three.
+
+    A refused key or an exhausted quota makes the endpoint close almost at
+    once, and the adapter sends its setup message almost at once -- so which
+    happens first is timing nobody controls. Against the fake server the
+    "close wins" ordering appeared only sometimes, which is exactly the kind
+    of bug a test suite reports as flakiness and a person reports as "it told
+    me something different yesterday".
+
+    So the ordering is pinned here instead of raced: a socket whose ``send``
+    raises the close, which is what the library does when the peer has
+    already gone. Both orderings must name the same cause, and the quota one
+    must stay :class:`OutOfCredit`, because that is the type that latches the
+    budget shut -- classify it as anything else and a project with no quota
+    left keeps retrying.
+    """
+    section("a close during startup is classified, whichever side wins")
+
+    class Closed(Exception):
+        """Shaped like websockets' ConnectionClosedError."""
+
+        def __init__(self, code: int, reason: str) -> None:
+            super().__init__(f"received {code} ({reason})")
+            self.rcvd = type("Frame", (), {"code": code, "reason": reason})()
+
+    class DeadSocket:
+        """Connects, then refuses the first send -- the peer already left."""
+
+        def __init__(self, code: int, reason: str) -> None:
+            self._exc = Closed(code, reason)
+
+        def send(self, _payload):
+            raise self._exc
+
+        def close(self, *a, **k):
+            return None
+
+        def __iter__(self):
+            raise self._exc
+
+    for code, reason, want, label in (
+        (1008, "UNAUTHENTICATED", NotConfigured, "a refused key"),
+        (1008, "RESOURCE_EXHAUSTED", OutOfCredit, "an exhausted quota"),
+        (1008, "PERMISSION_DENIED", NotConfigured,
+         "a model the project may not use"),
+    ):
+        def opener(_url, **_kw):
+            return DeadSocket(code, reason)
+
+        try:
+            GeminiLiveSession("k", "el-gr", connect=opener).wait_ready(1.0)
+            check(f"{label} raises", False, "no exception")
+        except want as exc:
+            check(f"{label} is {want.__name__} even when the close beats our "
+                  f"setup message", True)
+            check(f"and says why, rather than 'refused the setup message'",
+                  reason.lower() in str(exc).lower()
+                  or "api key" in str(exc).lower(), str(exc)[:80])
+        except Exception as exc:  # noqa: BLE001
+            check(f"{label} is {want.__name__} even when the close beats our "
+                  f"setup message", False,
+                  f"{type(exc).__name__}: {exc}")
+
+    # A close with nothing in it must still be the helpful message, not a
+    # bare code: this is what the endpoint actually does for some refusals.
+    def mute_opener(_url, **_kw):
+        return DeadSocket(1006, "")
+
+    try:
+        GeminiLiveSession("k", "el-gr", connect=mute_opener).wait_ready(1.0)
+        check("a close with no reason still raises", False, "no exception")
+    except NotConfigured as exc:
+        check("a close carrying no reason falls back to naming the key and "
+              "the model, which is the likeliest cause",
+              "GEMINI_API_KEY" in str(exc), str(exc)[:80])
+    except Exception as exc:  # noqa: BLE001
+        check("a close carrying no reason falls back to naming the key",
+              False, f"{type(exc).__name__}: {exc}")
+
+    check("_close_parts reads the frame whether the library attached it "
+          "directly or in rcvd/sent",
+          _close_parts(Closed(1008, "QUOTA")) == (1008, "QUOTA")
+          and _close_parts(RuntimeError("no frame")) == (None, ""))
+
+
 def main() -> int:
     print("=" * 70)
     print("Commentary QC - Gemini live translation")
@@ -630,6 +718,7 @@ def main() -> int:
         test_provider_is_honest()
         test_adapter(url, fake)
         test_live_run(url, fake)
+        test_a_startup_close_is_classified_by_its_reason()
     finally:
         fake.stop()
     print("\n" + "=" * 70)

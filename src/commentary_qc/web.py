@@ -36,7 +36,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+)
 from pydantic import BaseModel
 
 from commentary_qc.config import Settings
@@ -303,6 +308,16 @@ def create_app(
         registry=registry,
         source=settings.source,
         ffmpeg_bin=settings.ffmpeg_bin,
+        # The two things the translate side cannot work out for itself. The
+        # fixture feed is how a transcript becomes a named match, and the QC
+        # snapshot is how its channel picker knows what is on air and what it
+        # sounds like -- both already in this process, so neither costs a
+        # probe or a request.
+        fixtures=feed,
+        # Wrapped, not passed directly: `snapshot` is defined further down
+        # this function, so naming it here binds a local that does not
+        # exist yet. The lambda defers the lookup to request time.
+        qc_snapshot=lambda: snapshot(),
     )
 
     @asynccontextmanager
@@ -484,6 +499,28 @@ def create_app(
         meant the other was a link in a corner.
         """
         return home_page.read_text(encoding="utf-8")
+
+    @app.get("/static/ui.css")
+    def ui_css() -> Response:
+        """The shared tokens and primitives.
+
+        One route rather than a mounted directory: the only thing in `static/`
+        worth serving is this file, and the pages beside it are already served
+        by their own routes with their own docstrings. Mounting the folder
+        would publish whatever anybody drops in it next.
+
+        Read per request rather than cached in a string, so editing the
+        stylesheet shows up on a refresh instead of needing a restart. It is a
+        few kilobytes off a local disk.
+        """
+        return Response(
+            (static / "ui.css").read_text(encoding="utf-8"),
+            media_type="text/css",
+            # Short, not zero: long enough that a page with three stylesheet
+            # references does not read the file three times, short enough that
+            # nobody is ever looking at a stale one.
+            headers={"cache-control": "public, max-age=60"},
+        )
 
     @app.get("/qc", response_class=HTMLResponse)
     def qc_view() -> str:
