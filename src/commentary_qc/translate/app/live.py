@@ -126,6 +126,10 @@ class LiveRun:
         on_finish: Any | None = None,
     ) -> None:
         self.id = uuid.uuid4().hex[:16]
+        #: Set when this run is one language of a multi-language group. The
+        #: runner counts groups rather than legs against its limit, because a
+        #: group is one thing somebody started and one pull on the vendor.
+        self.group = ""
         self.channel = channel
         self.wiring = wiring
         self.source_language = (source_language or "auto").strip().lower()
@@ -207,7 +211,16 @@ class LiveRun:
 
     @property
     def running(self) -> bool:
-        return not self._finished.is_set()
+        """Started, and not yet finished.
+
+        Both halves matter. "Not finished" alone was the original definition
+        and it reported a run that had never been started as running forever,
+        because nothing was ever going to set the finished flag. That is not
+        hypothetical: a group whose budget check failed after the runner had
+        taken its legs on left the channel permanently blocked, and the only
+        way out was restarting the process.
+        """
+        return self._thread is not None and not self._finished.is_set()
 
     # -- the loop --------------------------------------------------------
     def _work(self) -> None:
@@ -500,6 +513,31 @@ class LiveRun:
             pass
 
     # -- what the page sees ----------------------------------------------
+    def heard_text(self) -> str:
+        """Everything the model reported hearing, as one passage.
+
+        The source commentary, not the translation -- which is what makes it
+        usable for working out the language and the fixture. Partials are
+        included: a sentence still being transcribed is as good a sample of
+        the language as a finished one, and waiting for the caption to close
+        would mean the first verdict arrives a sentence later than it needs to.
+        """
+        with self._lock:
+            parts = [c.heard for c in self._captions if c.heard]
+            tail = self._heard_part.strip()
+        if tail:
+            parts.append(tail)
+        return " ".join(parts)
+
+    def said_text(self) -> str:
+        """Everything the model said, as one passage."""
+        with self._lock:
+            parts = [c.said for c in self._captions if c.said]
+            tail = self._said_part.strip()
+        if tail:
+            parts.append(tail)
+        return " ".join(parts)
+
     def snapshot(self, captions: int = 40) -> dict[str, Any]:
         with self._lock:
             recent = [c.to_dict() for c in self._captions[-captions:]]
@@ -508,6 +546,7 @@ class LiveRun:
         elapsed = (self.ended or time.time()) - self.started
         return {
             "id": self.id,
+            "group": self.group,
             "channel": self.channel,
             "phase": self.phase,
             "running": self.running,
@@ -652,29 +691,138 @@ class LiveRunner:
         self.keep = max(1, int(keep))
         self._runs: dict[str, LiveRun] = {}
         self._order: list[str] = []
+        #: Multi-language groups, kept beside the runs rather than instead of
+        #: them: a leg is a perfectly ordinary run and every endpoint that
+        #: serves one run -- audio, stop, poll -- works on a leg unchanged.
+        self._groups: dict[str, Any] = {}
+        self._group_order: list[str] = []
         self._lock = threading.Lock()
+
+    def _units(self, live: list[LiveRun]) -> int:
+        """How many things are running, counting a group as one.
+
+        A group is one channel, one pull and one thing somebody started, so a
+        three-language group must not read as three sessions against a limit
+        that exists to stop two channels being translated at once.
+        """
+        return len({r.group or r.id for r in live})
+
+    def _admit(self, run: LiveRun, *, grouped: bool = False) -> None:
+        """Check there is room, then take the run on. Call under the lock."""
+        live = [r for r in self._runs.values() if r.running]
+        busy = next((r for r in live if r.channel == run.channel), None)
+        if busy is not None and busy.group != run.group:
+            raise AtCapacity(
+                f"{run.channel} is already being translated "
+                f"(run {busy.id}); stop that one first"
+            )
+        if not grouped and self._units(live) >= self.max_concurrent:
+            others = ", ".join(sorted({r.channel for r in live}))
+            raise AtCapacity(
+                f"only {self.max_concurrent} live translation "
+                f"{'session' if self.max_concurrent == 1 else 'sessions'} "
+                f"at a time, and {others} is running"
+            )
+        self._runs[run.id] = run
+        self._order.append(run.id)
+        self._forget_old()
 
     def start(self, run: LiveRun) -> LiveRun:
         with self._lock:
+            self._admit(run)
+            run._on_finish = self._filed
+        return run.start()
+
+    def start_group(self, group: Any) -> Any:
+        """Take on every leg of a multi-language group, then start it.
+
+        Capacity is checked once, for the group, and the legs are admitted
+        together: half a group running because the third language was
+        refused is the one outcome worth avoiding, since the point of
+        starting them together is that they are comparable.
+        """
+        legs = list(getattr(group, "legs", []))
+        if not legs:
+            raise NotConfigured("a group needs at least one language")
+        with self._lock:
             live = [r for r in self._runs.values() if r.running]
-            busy = next((r for r in live if r.channel == run.channel), None)
+            busy = next((r for r in live if r.channel == group.channel), None)
             if busy is not None:
                 raise AtCapacity(
-                    f"{run.channel} is already being translated "
+                    f"{group.channel} is already being translated "
                     f"(run {busy.id}); stop that one first"
                 )
-            if len(live) >= self.max_concurrent:
-                others = ", ".join(sorted(r.channel for r in live))
+            if self._units(live) >= self.max_concurrent:
+                others = ", ".join(sorted({r.channel for r in live}))
                 raise AtCapacity(
-                    f"only {self.max_concurrent} live translation "
-                    f"{'session' if self.max_concurrent == 1 else 'sessions'} "
-                    f"at a time, and {others} is running"
+                    f"only {self.max_concurrent} channel"
+                    f"{'' if self.max_concurrent == 1 else 's'} "
+                    f"can be translated at a time, and {others} is running"
                 )
-            run._on_finish = self._filed
-            self._runs[run.id] = run
-            self._order.append(run.id)
-            self._forget_old()
-        return run.start()
+            # Keep the group's own hook: it is how the group learns its last
+            # leg has finished. Overwriting it with the filing hook would
+            # leave the group permanently "running".
+            for leg in legs:
+                own = leg._on_finish
+                leg._on_finish = self._both(own)
+                self._admit(leg, grouped=True)
+            self._groups[group.id] = group
+            self._group_order.append(group.id)
+            while len(self._group_order) > self.keep:
+                stale = self._group_order.pop(0)
+                self._groups.pop(stale, None)
+        try:
+            return group.start()
+        except Exception:
+            # Starting can still be refused -- the budget covers every leg and
+            # is checked once the group knows how many there are -- and a group
+            # that was taken on and then never started would hold this
+            # channel, and the one channel slot, for the life of the process.
+            self._forget(group)
+            raise
+
+    def _forget(self, group: Any) -> None:
+        """Undo taking a group on, for a group that never started."""
+        with self._lock:
+            self._groups.pop(group.id, None)
+            if group.id in self._group_order:
+                self._group_order.remove(group.id)
+            for leg in getattr(group, "legs", []):
+                self._runs.pop(leg.id, None)
+                if leg.id in self._order:
+                    self._order.remove(leg.id)
+
+    def _both(self, own: Any) -> Any:
+        """File the run, then tell whatever else was waiting on it."""
+        def finished(run: LiveRun) -> None:
+            self._filed(run)
+            if own is not None:
+                own(run)
+        return finished
+
+    def group(self, group_id: str) -> Any | None:
+        with self._lock:
+            return self._groups.get(group_id)
+
+    def current_group(self) -> Any | None:
+        """The group somebody is most likely asking about."""
+        with self._lock:
+            for group_id in reversed(self._group_order):
+                found = self._groups.get(group_id)
+                if found is not None and found.running:
+                    return found
+            for group_id in reversed(self._group_order):
+                found = self._groups.get(group_id)
+                if found is not None:
+                    return found
+        return None
+
+    def groups(self) -> list[Any]:
+        with self._lock:
+            return [
+                self._groups[i] for i in reversed(self._group_order)
+                if i in self._groups
+            ]
 
     def _filed(self, run: LiveRun) -> None:
         """Write the finished run to the store, once."""

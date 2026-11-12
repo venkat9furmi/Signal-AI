@@ -139,6 +139,14 @@ class TranslateSettings:
     #: documents an API concurrency of 1 and a second session is refused by
     #: the far end only after audio has started flowing.
     live_concurrent: int = 1
+    #: Output languages one channel may be translated into at the same time.
+    #: One commentator serving several markets is the shape of the product, so
+    #: the limit is about cost rather than capability: every language is its
+    #: own metered session, and the audio is pulled once however many there
+    #: are. A provider that documents a lower concurrency than this overrides
+    #: it -- the adapter says so and the group is refused before anything is
+    #: spent.
+    live_targets_max: int = 4
 
     # -- plumbing -------------------------------------------------------
     #: Segments waiting to be sent. Small on purpose: if the provider is
@@ -235,6 +243,8 @@ class TranslateSettings:
             raise ValueError("live_seconds must be positive")
         if self.live_concurrent < 1:
             raise ValueError("live_concurrent must be at least 1")
+        if self.live_targets_max < 1:
+            raise ValueError("live_targets_max must be at least 1")
         # Tuples, so a settings object shared between threads cannot be
         # mutated underneath one of them.
         self.enabled_providers = tuple(self.enabled_providers)
@@ -311,6 +321,8 @@ class TranslateSettings:
             data["live_seconds"] = float(env["QC_LIVE_SECONDS"])
         if env.get("QC_LIVE_CONCURRENT"):
             data["live_concurrent"] = int(env["QC_LIVE_CONCURRENT"])
+        if env.get("QC_LIVE_TARGETS_MAX"):
+            data["live_targets_max"] = int(env["QC_LIVE_TARGETS_MAX"])
         # The voice and the synthesis model are environment settings so they
         # can be changed on a deployment without editing code -- which is the
         # whole point of the adapter being swappable.

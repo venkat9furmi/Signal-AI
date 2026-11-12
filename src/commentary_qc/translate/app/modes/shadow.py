@@ -21,9 +21,12 @@ import uuid
 
 import numpy as np
 
+from typing import Any
+
 from commentary_qc.translate import adapters as provider_registry
 from commentary_qc.translate.infra.audio import to_wav
 from commentary_qc.translate.app.budget import Budget
+from commentary_qc.translate.app.group import LiveGroup
 from commentary_qc.translate.app.live import LiveRun
 from commentary_qc.translate.core.ports import AudioSource
 from commentary_qc.translate.core.languages import AUTO, primary
@@ -130,6 +133,41 @@ class ShadowMode:
             audio=audio,
             max_seconds=seconds or settings.live_seconds,
             url=url,
+        )
+
+    def live_group(
+        self,
+        wiring: Wiring,
+        channel: str,
+        targets: list[str],
+        *,
+        audio: AudioSource,
+        source_language: str = "auto",
+        live_mode: str = "",
+        seconds: float = 0.0,
+        fixtures: Any = None,
+        configured_language: str = "",
+    ) -> LiveGroup:
+        """One channel into several languages at once. Does not start it.
+
+        The same wiring as :meth:`live`, and deliberately so -- a group is not
+        a different feature, it is the live path with the audio fanned out to
+        one session per language. What changes is the arithmetic: the budget
+        check has to cover every leg before the first one opens, because half
+        a comparison is worth less than none.
+        """
+        settings = wiring.settings
+        return LiveGroup(
+            channel,
+            wiring,
+            targets,
+            audio=audio,
+            source_language=source_language or "auto",
+            live_mode=(live_mode or settings.live_mode),
+            max_seconds=seconds or settings.live_seconds,
+            max_targets=settings.live_targets_max,
+            fixtures=fixtures,
+            configured_language=configured_language,
         )
 
     # -- one run ---------------------------------------------------------

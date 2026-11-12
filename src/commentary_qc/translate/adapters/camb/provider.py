@@ -54,6 +54,13 @@ class CambProvider:
     #: What gets recorded alongside each caption, so a change of model is
     #: visible in the data rather than inferred from the date.
     model = "camb/transcribe+translate+tts"
+    #: Live sessions this vendor will hold open at once. One, because Camb's
+    #: free plan documents an API concurrency of 1 -- and a second session is
+    #: refused by the far end only after audio has started flowing, which
+    #: means after the meter has started. Declared here so the app can refuse
+    #: a multi-language group before anything is spent; the app does not read
+    #: vendor plans, it asks the adapter.
+    max_live_sessions = 1
 
     def __init__(self, settings: TranslateSettings, opener: Any | None = None) -> None:
         self.settings = settings
