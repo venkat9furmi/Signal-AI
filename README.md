@@ -1,18 +1,73 @@
-# MMC Sport Audio
+# SignalAI
+
+**Real-time audio quality monitoring and AI dubbing for live sports commentary.**
+
+Football commentary is streamed live to bookmakers, where a commentator who is
+too quiet, distorting, or buried under the crowd costs the customer the match
+they paid to follow. Until now, interns listened to each channel by ear and
+messaged commentators on WhatsApp when something sounded wrong.
+
+SignalAI does that job on **52 channels at once**, a measurement every 1.024
+seconds, against broadcast standards rather than guesswork.
+
+### What it measures, and why each one is harder than it looks
+
+- **Loudness** — ITU-R BS.1770-4 K-weighting, with the filter state carried
+  across windows. The obvious implementation resets the filters every second,
+  which injects a transient at each boundary and corrupts exactly the
+  low-level readings dead-air detection depends on.
+- **True peak** — 4× oversampled per BS.1770-4 Annex 2. This feed peaks above
+  the ceiling while no individual sample ever does; a sample-peak meter
+  reports it as clean and a downstream encoder clips it.
+- **Voice against crowd** — no source separation model. A neural VAD (Silero)
+  finds the gaps between words, the crowd is measured *there*, and the voice
+  is what remains once the crowd power is subtracted from the speech. Every
+  level stays in LUFS, so voice, crowd and programme loudness are directly
+  comparable.
+- **Is anyone actually there** — a pre-match holding clip is technically
+  perfect audio and completely useless. It is caught two ways: a recording
+  never pauses to breathe, and a recording repeats. The second compares three
+  minutes of loudness against itself at a 15–90 s lag; filler scores
+  0.77–1.00, live commentary 0.2–0.5, with no overlap.
+
+Commentators get one instruction at a time, naming a control they actually
+have. Producers get a post-match report. **Every threshold traces to a
+measurement** — a blind listening test, a backtest over labelled nights, or a
+distribution over real windows — and each one is written down with the
+evidence beside it in `config.py`.
+
+Noise control is treated as a first-class problem, because an alerting system
+nobody trusts is worse than none: thermostats, clip masking, a repeated
+identical fault read as a recording, and hold times derived from measured
+outage durations rather than picked.
+
+### SignalAI Dubbing
+
+The second half, and experimental by design. One commentator's audio is pulled
+once and fanned out to several live speech-to-speech sessions at the same
+time, so one English commentator can serve Greek, German and French markets
+from a single feed. Ports and adapters throughout — the model is one file and
+one registry line, and nothing outside `adapters/` names a vendor.
+
+Nothing it produces is published. It exists so somebody can listen and decide
+whether a model is good enough to put in front of anyone.
+
+### The shape of it
+
+Two things run on the same football commentary, and **the audio is pulled once
+and both read it**. Python, FastAPI, FFmpeg, SQLite, Docker — two containers,
+one command, no cloud dependency.
+
+```
+docker compose up -d --build
+```
+
+Then open <http://127.0.0.1:8642> and pick one.
 
 **New here?** Read [ARCHITECTURE.md](ARCHITECTURE.md) — it explains how the
-whole thing is put together, walks a piece of audio through every flow, and
-ends with the to-do list. This file is the shorter operator's guide.
-
-Two things that run on the same football commentary:
-
-- **QC Commentary** listens to every channel that is on air and says when
-  something would sound wrong to a bookmaker's customer.
-- **MMC AI Dubbing** takes a channel and translates it out loud, as it
-  happens, into another language.
-
-The audio is pulled once and both read it. Open <http://127.0.0.1:8642> and
-pick one.
+whole thing is put together, walks a piece of audio through every flow, names
+the technical debt honestly, and ends with the to-do list. This file is the
+shorter operator's guide.
 
 ---
 
