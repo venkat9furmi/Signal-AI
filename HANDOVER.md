@@ -137,14 +137,49 @@ laptop. This is the single highest-value piece of ops work outstanding.
 
 ---
 
-## 7. Your first week
+---
+
+## 7. What to read, and in what order
+
+About two hours to where you could fix a bug. Make it run first — none of it
+makes much sense until you have seen it working.
+
+**The ninety-minute path**
+
+| # | File | Lines | Why |
+|---|---|---|---|
+| 1 | `ARCHITECTURE.md` §1–4 | 734 | The whole system, audio walked through every flow. The rest later. |
+| 2 | `src/commentary_qc/config.py` | 392 | **Read slowly.** Every threshold, and beside each one the measurement it came from. The closest thing to a specification. |
+| 3 | `src/commentary_qc/engine.py` | 552 | The rules and the hysteresis. The heart of the QC half, readable in one sitting. |
+| 4 | `src/commentary_qc/metrics.py` | 377 | Where audio becomes numbers. The voice/crowd split is about twenty lines in `_analyze`. |
+| 5 | `src/commentary_qc/loudness.py` | 117 | Short, and the comments explain why it is not a library call. |
+| 6 | `tests/test_engine.py` | — | **Run it.** Each test names a real incident. |
+
+**Then, when you need them**
+
+`supervisor.py` (575) when something restarts oddly · `audio_source.py` (214)
+when a stream misbehaves · `discovery.py` (134) for how a channel name becomes
+a URL · `store.py` (445) before adding a column · `notify.py` (216) for Slack ·
+`web.py` (700) for the page · `vad.py` (143) short, and documents a trap that
+cost real debugging time.
+
+**The translation half** — skip it until you need it; it is independent and
+publishes nothing. Then `translate/core/ports.py` (the contract a model has to
+meet), `adapters/mock/` (the whole architecture in one short adapter),
+`app/group.py` (one channel into several languages), and
+`tests/test_architecture.py` (the dependency rule, enforced).
+
+**Before you change anything**, read `thresholds.json`'s own `_readme`, and
+`ARCHITECTURE.md` §7 "Rules that are not obvious" — four of them will save you
+an afternoon each.
+
+## 8. Your first week
 
 1. `docker compose up -d --build`, then watch `docker compose logs -f recorder`
    for ten minutes. Open <http://127.0.0.1:8642>.
 2. Run the tests. They pass, they need no API key, and they are the fastest
    description of what the system promises.
-3. Read `README.md` → "If you are picking this up". It gives a file-by-file
-   order and roughly how long each takes.
+3. Read §7 above, in order. It is about two hours.
 4. Rotate the Slack token. Get admin on the Slack app.
 5. Copy `clips/`, `assessment*/` and a database snapshot off the machine.
 6. Read `ARCHITECTURE.md` §9 and §10 — what to improve, ranked, and the

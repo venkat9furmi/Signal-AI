@@ -322,6 +322,22 @@ about whether it has a `None` case.
 This one *is* layered, because it has to survive the model changing. It
 already has: Camb AI first, then Gemini, and a third will come.
 
+| | Live | Clips | Greek | German | Cost |
+|---|---|---|---|---|---|
+| **Gemini** | yes | no | **yes** | yes | free on Google's free tier |
+| **Camb AI** | yes, 14 languages | yes | live: **no**, clips: yes | yes | 6 minutes free, once |
+| **Offline stand-in** | yes | yes | yes | yes | free, and deliberately sounds nothing like speech |
+
+Gemini is the one that does what MMC needs: `gemini-3.5-live-translate-preview`,
+79 languages including Greek, audio straight to translated audio. Camb's live
+path carries 14 languages and neither Greek nor Italian. Adding a third model
+is one file in `adapters/` and one line in the registry; nothing in the app or
+the page learns its name.
+
+Google's free tier states that free-tier input and output are used to improve
+their products, so MMC's commentary becomes training data until somebody
+agrees otherwise.
+
 ### The layers
 
 ```
