@@ -245,7 +245,12 @@ class ChannelMonitor:
                 if in_gap:
                     in_gap = False
                     self.outage.ok(self.channel.name)
-                    self._emit(engine.on_reconnect(block.wall).to_dict())
+                    # None when the gap was too short to have been
+                    # reported: clearing an alert nobody was sent is
+                    # noise of its own.
+                    back = engine.on_reconnect(block.wall)
+                    if back is not None:
+                        self._emit(back.to_dict())
 
                 # Two things change whether this channel should be translated:
                 # a claim arriving or being released, and somebody moving the

@@ -200,6 +200,25 @@ class Thresholds:
     #: nearly dead and nobody was told, because the alert was already up.
     escalate_step_db: float = 6.0
 
+    #: Per-rule override of the step above, for measures that do not live on
+    #: the same scale as loudness.
+    #:
+    #: The balance rules needed this. `crowd_dominating` escalated **153 times
+    #: on 212 fires** in the two months to 2026-11-12 -- 72%, so nearly every
+    #: instance also sent a "getting worse" message. The cause is that
+    #: voice-over-crowd spans 1.4 dB to 33.4 dB across real commentary (p05 to
+    #: p95), where loudness spans a few dB, so a 6 dB step is ordinary
+    #: variation on one scale and a real deterioration on the other.
+    #:
+    #: 12 dB is roughly a third of the observed range rather than a twentieth,
+    #: which is the same proportion 6 dB is of a loudness swing.
+    escalate_step_by_rule: dict[str, float] = field(
+        default_factory=lambda: {
+            "crowd_dominating": 12.0,
+            "voice_dominates": 12.0,
+        }
+    )
+
     #: Rules that do not apply to this channel. Not every detector is
     #: meaningful on every feed: studio racing commentary has no crowd bed by
     #: design, so `no_crowd` and `crowd_dominating` fire constantly and measure
@@ -225,6 +244,13 @@ class Thresholds:
             # Renamed from dead_air: the flag should say what was observed, not use
             # broadcast jargon. The knob below keeps its old name.
             "silence": 12.0,
+            # A capture gap has to last before anybody is told. Measured
+            # over 2,010 of them to 2026-11-12: median 9 s, 53% over
+            # inside 15 s, and 556 were our own container failing to
+            # resolve the vendor hostname. Those are not broadcast faults
+            # and they are fixed before a commentator could read the
+            # message. 45 s keeps the 24% that lasted minutes.
+            "stream_down": 45.0,
             # Loudness is now judged over a minute, so the alert waits for the
             # minute figure to stay out of range, not for a 3-second spike.
             "too_loud": 30.0,

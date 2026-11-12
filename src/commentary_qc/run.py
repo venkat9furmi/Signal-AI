@@ -128,7 +128,9 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             if in_gap:
                 in_gap = False
-                _emit(engine.on_reconnect(block.wall).to_dict())
+                back = engine.on_reconnect(block.wall)
+                if back is not None:
+                    _emit(back.to_dict())
 
             for window in analyzer.push(block.samples, block.wall):
                 windows += 1

@@ -12,7 +12,11 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from commentary_qc.config import AnalyzerConfig, Thresholds  # noqa: E402
+from commentary_qc.config import (  # noqa: E402
+    WINDOW_SECONDS,
+    AnalyzerConfig,
+    Thresholds,
+)
 from commentary_qc.engine import (  # noqa: E402
     REPEAT_EVIDENCE,
     AlertEngine,
@@ -264,6 +268,140 @@ def test_dead_air_is_never_masked_by_the_repeat_verdict() -> None:
             if a.rule == "silence" and a.event == "FIRE":
                 silent += 1
     assert silent == 1, f"dead air was masked by the recording verdict ({silent})"
+
+
+
+# -- a capture gap, which is not a fault until it lasts --------------------
+def test_a_short_gap_is_not_reported_at_all() -> None:
+    """The median real outage lasted 9 seconds.
+
+    Measured over 2,010 of them to 2026-11-12: 53% were over inside fifteen
+    seconds, and 556 were our own container failing to resolve the vendor's
+    hostname. Firing on the first gap block paged a commentator about a
+    reconnect that had already finished, for a fault that was often not
+    theirs and sometimes not a broadcast fault at all.
+    """
+    engine = AlertEngine(Thresholds(), "t")
+    assert engine.on_gap(1000.0, "stalled") == [], "fired on the first gap block"
+    assert engine.on_gap(1009.0, "reconnect in 1s") == [], "fired at 9 s"
+    back = engine.on_reconnect(1010.0)
+    assert back is None, "cleared an alert that was never sent"
+
+
+def test_a_gap_that_lasts_is_reported_once() -> None:
+    th = Thresholds()
+    hold = th.attack_s["stream_down"]
+    engine = AlertEngine(th, "t")
+    engine.on_gap(1000.0, "stalled")
+    assert engine.on_gap(1000.0 + hold - 1, "reconnect in 8s") == []
+    fired = engine.on_gap(1000.0 + hold + 1, "Failed to resolve hostname")
+    downs = [a for a in fired if a.rule == "stream_down" and a.event == "FIRE"]
+    assert len(downs) == 1, f"expected one stream_down, got {len(downs)}"
+    # The latest reason wins: "stalled" usually becomes a named error on the
+    # next attempt, and the named one is the one worth reading.
+    assert "resolve hostname" in downs[0].message, downs[0].message
+    assert downs[0].evidence["down_s"] >= hold
+
+    again = engine.on_gap(1000.0 + hold + 30, "reconnect in 30s")
+    assert not [a for a in again if a.rule == "stream_down"], "fired twice for one outage"
+
+    back = engine.on_reconnect(1000.0 + hold + 60)
+    assert back is not None and back.event == "CLEAR", "a reported outage never cleared"
+
+
+def test_a_short_gap_does_not_clear_a_firing_fault() -> None:
+    """A nine-second blip must not clear a fault that is genuinely up.
+
+    Clearing on the first gap block meant a real "too quiet" was cleared and
+    then re-fired a moment later, which reads as two faults rather than one.
+    """
+    th = Thresholds()
+    engine = AlertEngine(th, "t")
+    seq = 0
+    for _ in range(int(th.attack_s["too_quiet"] / WINDOW_SECONDS) + 4):
+        seq += 1
+        engine.push(_window(seq, lufs=-44.0, lufs_short=-44.0, lufs_minute=-44.0))
+    assert "too_quiet" in engine.active_alerts(), "the fault never fired"
+
+    engine.on_gap(5000.0, "stalled")
+    engine.on_gap(5009.0, "reconnect in 1s")
+    assert "too_quiet" in engine.active_alerts(), "a 9 s blip cleared a real fault"
+    assert engine.on_reconnect(5010.0) is None
+
+    engine.on_gap(6000.0, "stalled")
+    out = engine.on_gap(6000.0 + th.attack_s["stream_down"] + 1, "eof")
+    assert any(a.rule == "too_quiet" and a.event == "CLEAR" for a in out),         "a real outage should clear the quality rules, whose inputs are stale"
+
+
+
+
+# -- escalation: "worse" has to mean the same thing on every scale ---------
+def test_dead_air_never_escalates() -> None:
+    """A dead channel sinking further is not a deteriorating fault.
+
+    `silence` escalated 73 times on 293 fires in the two months to
+    2026-11-12 -- a quarter of them -- because a feed drifting from -50 to
+    -56 LUFS trips the 6 dB step. It is already silent. There is no worse,
+    and nobody can act on the difference.
+    """
+    engine = AlertEngine(Thresholds(), "t")
+    events = []
+    for i, lvl in enumerate([-55.0] * 30 + [-70.0] * 30 + [-90.0] * 30):
+        for a in engine.push(_window(i, lufs_minute=lvl, lufs_short=lvl,
+                                     speech_ratio=0.0)):
+            if a.rule == "silence":
+                events.append(a.event)
+    assert "FIRE" in events, "dead air should still be reported"
+    assert "ESCALATE" not in events, f"dead air escalated: {events}"
+
+
+def test_the_balance_rules_use_their_own_step() -> None:
+    """Voice-over-crowd spans 1.4 to 33.4 dB; loudness spans a few.
+
+    `crowd_dominating` escalated on 153 of its 212 fires -- 72% -- because
+    one global 6 dB step is ordinary variation on that scale. The step is
+    per rule now, so "getting worse" means a comparable amount of worse
+    whichever rule says it.
+    """
+    th = Thresholds()
+    engine = AlertEngine(th, "t")
+    assert engine._step("crowd_dominating") > engine._step("too_quiet"), \
+        "the balance rules need a wider step than the loudness rules"
+
+    # Buried by 5.0 dB, then by 11.0: a 6 dB slide, which used to escalate
+    # and now must not, because it is within normal variation for this
+    # measure.
+    events = []
+    for i, bal in enumerate([5.0] * 40 + [-1.0] * 40):
+        for a in engine.push(_window(
+            i, voice_to_crowd_med=bal, voice_to_crowd_db=bal,
+            speech_ratio=0.8, crowd_measured=True, crowd_lufs=-30.0,
+        )):
+            if a.rule == "crowd_dominating":
+                events.append(a.event)
+    assert events[:1] == ["FIRE"], events
+    assert "ESCALATE" not in events, f"a 6 dB slide still escalated: {events}"
+
+
+def test_a_genuine_collapse_still_escalates() -> None:
+    """The wider step must not become a way to silence a real collapse.
+
+    Ch.31 on 2026-11-07 went from -12.3 dB to -30.0 dB buried in the crowd
+    and the escalation fired correctly. That is 17.7 dB and must still be
+    reported.
+    """
+    engine = AlertEngine(Thresholds(), "t")
+    events = []
+    for i, bal in enumerate([-12.3] * 40 + [-30.0] * 40):
+        for a in engine.push(_window(
+            i, voice_to_crowd_med=bal, voice_to_crowd_db=bal,
+            speech_ratio=0.8, crowd_measured=True, crowd_lufs=-30.0,
+        )):
+            if a.rule == "crowd_dominating":
+                events.append((a.event, a.message))
+    kinds = [e for e, _ in events]
+    assert kinds[:2] == ["FIRE", "ESCALATE"], events
+    assert events[1][1].startswith("Getting worse"), events[1][1]
 
 
 if __name__ == "__main__":

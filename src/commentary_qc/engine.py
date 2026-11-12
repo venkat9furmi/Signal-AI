@@ -281,8 +281,12 @@ REPEAT_HOLD_S = 600.0
 #: entry here can escalate: while it is up, another `escalate_step_db` of
 #: deterioration raises a fresh alert instead of sitting silent. Rules with no
 #: sensible scale (a clip is playing, there is no crowd) are absent.
+#:
+#: **`silence` is deliberately absent.** It escalated 73 times on 293 fires in
+#: the two months to 2026-11-12 -- a quarter of them -- because a dead channel
+#: drifting from -50 to -56 LUFS trips a 6 dB step. It is already dead; there
+#: is no worse, and nobody can act on the difference.
 _ESCALATION_SCALE = {
-    "silence": lambda m: -m.lufs_short,
     "too_quiet": lambda m: -m.lufs_minute,
     "too_loud": lambda m: m.lufs_minute,
     "clipping": lambda m: m.true_peak_dbtp,
@@ -318,18 +322,66 @@ class AlertEngine:
         #: Media time until which a repeat has convinced us this is playout.
         self._repeat_until = 0.0
         self._repeat_reason = ""
+        #: When the current capture gap began, and whether it has lasted
+        #: long enough to have been reported. See on_gap().
+        self._gap_since = 0.0
+        self._gap_fired = False
+        self._gap_reason = ""
 
     def active_alerts(self) -> list[str]:
         return sorted(rid for rid, st in self._state.items() if st.active)
 
+    def _step(self, rule_id: str) -> float:
+        """How much worse a firing fault must get before it is said again.
+
+        Per rule, falling back to the global step. The balance rules live on
+        a far wider scale than the loudness ones, so one number for both made
+        "getting worse" mean something different depending on which rule said
+        it. See ``Thresholds.escalate_step_by_rule``.
+        """
+        return (getattr(self.th, "escalate_step_by_rule", None) or {}).get(
+            rule_id, self.th.escalate_step_db
+        )
+
     def on_gap(self, wall: float, reason: str) -> list[Alert]:
-        """Handle a capture gap.
+        """Handle a capture gap. Says nothing until the gap has lasted.
 
         A stream that is not delivering is not silent -- it is absent. Firing
         silence here would misdirect whoever picks up the alert, so instead we
         clear the audio-quality rules (their inputs are stale) and report the
         transport fault itself.
+
+        **But not immediately.** This used to fire on the first gap block,
+        which is a stall of ten seconds or a single failed reconnect. Measured
+        over 2,010 of them: the median outage lasted **9 seconds** and 53%
+        were over inside 15 -- fixed before anyone could read the message --
+        while 556 were our own container failing to resolve the vendor's
+        hostname, which is not a broadcast fault at all. So it waits
+        ``attack_s["stream_down"]`` before saying anything, like every other
+        rule.
+
+        The other rules are cleared at the same moment rather than on the
+        first gap block, for the same reason: a nine-second blip should not
+        clear a "too quiet" that is genuinely firing, only to re-fire it a
+        moment later.
+
+        Called once per gap block, and the source keeps producing those for
+        as long as the outage lasts (one per reconnect attempt, backing off
+        to every 30 s), so the deadline is checked against the wall clock
+        rather than counted in blocks.
         """
+        if not self._gap_since:
+            self._gap_since = wall
+            self._gap_reason = reason
+            return []
+        # Keep the latest reason: "stalled" often becomes a named error on
+        # the next attempt, and the named one is the useful one.
+        self._gap_reason = reason or self._gap_reason
+        hold = self.th.attack_s.get("stream_down", 45.0)
+        if self._gap_fired or wall - self._gap_since < hold:
+            return []
+
+        self._gap_fired = True
         out: list[Alert] = []
         for rule in self.rules:
             st = self._state[rule.id]
@@ -340,16 +392,28 @@ class AlertEngine:
                     Alert("CLEAR", rule.id, rule.severity, self.channel,
                           "cleared: stream gap", 0.0, wall, 0.0, {})
                 )
+        down_s = wall - self._gap_since
         out.append(
             Alert("FIRE", "stream_down", "critical", self.channel,
-                  f"Stream not delivering audio ({reason})", 0.0, wall, 0.0,
-                  {"reason": reason})
+                  f"Stream not delivering audio ({self._gap_reason})",
+                  0.0, wall, down_s, {"reason": self._gap_reason,
+                                      "down_s": round(down_s, 1)})
         )
         return out
 
-    def on_reconnect(self, wall: float) -> Alert:
+    def on_reconnect(self, wall: float) -> Alert | None:
+        """Audio is back. ``None`` when the gap never lasted long enough to
+        be reported -- clearing an alert nobody was sent is noise of its own.
+        """
+        fired, began = self._gap_fired, self._gap_since
+        self._gap_since = 0.0
+        self._gap_fired = False
+        self._gap_reason = ""
+        if not fired:
+            return None
         return Alert("CLEAR", "stream_down", "critical", self.channel,
-                     "Stream delivering audio again", 0.0, wall, 0.0, {})
+                     "Stream delivering audio again", 0.0, wall,
+                     wall - began if began else 0.0, {})
 
     def push(self, m: MetricsWindow) -> list[Alert]:
         """Advance every rule by one window; return any state transitions."""
@@ -417,7 +481,7 @@ class AlertEngine:
                 st.fired_at = m.t
                 st.mark = scale(m) if scale else 0.0
                 out.append(alert)
-            elif st.active and hit and scale and scale(m) >= st.mark + self.th.escalate_step_db:
+            elif st.active and hit and scale and scale(m) >= st.mark + self._step(rule.id):
                 # Same fault, materially worse: say so again rather than leave
                 # the first message standing while it deteriorates.
                 st.mark = scale(m)
