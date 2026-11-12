@@ -1,0 +1,89 @@
+{
+  "_readme": [
+    "Threshold overrides. Edit this file, then: docker compose restart",
+    "",
+    "Anything you do NOT list here keeps the default from",
+    "src/commentary_qc/config.py -- which is also where the comment",
+    "explaining WHERE EACH NUMBER CAME FROM lives. Read that before",
+    "changing one. Every default has a measurement behind it.",
+    "",
+    "A typo is refused at startup rather than silently ignored, so if a",
+    "container will not boot after an edit, check `docker compose logs`",
+    "for 'unknown Thresholds keys'. A contradiction is refused too: a",
+    "clear level on the wrong side of its fire level would clear an alert",
+    "the moment it fired.",
+    "",
+    "The full list of names is in _example below, at their current",
+    "defaults. Copy the ones you want into \"thresholds\" and change them.",
+    "Keys under _example are ignored."
+  ],
+
+  "thresholds": {},
+
+  "_example": {
+    "comment": "Copy from here into \"thresholds\" above. These ARE the defaults.",
+
+    "_loudness_band": "what counts as too loud or too quiet, over a minute",
+    "target_lufs": -18.0,
+    "too_loud_lufs": -17.0,
+    "too_loud_clear_lufs": -19.0,
+    "too_quiet_lufs": -40.0,
+    "too_quiet_clear_lufs": -37.0,
+    "dead_air_lufs": -50.0,
+
+    "_peaks": "EBU R128 allows -1 dBTP; 3 flat-topped samples is distortion",
+    "true_peak_dbtp": -1.0,
+    "clip_run_samples": 3,
+
+    "_balance": "voice against the crowd bed, in dB",
+    "crowd_dominating_db": 6.0,
+    "voice_dominates_db": 20.0,
+    "no_crowd_lufs": -45.0,
+    "min_speech_ratio_for_balance": 0.3,
+
+    "_filler": "is a holding clip playing rather than a person",
+    "filler_speech_ratio": 0.88,
+    "filler_crowd_lufs": -40.0,
+    "filler_level_sd": 1.6,
+    "filler_loop_score": 0.6,
+    "filler_quiet_speech_floor": 0.1,
+
+    "_speech": "how much of a window must be speech to count as talking",
+    "speech_ratio_present": 0.15,
+
+    "_escalation": "how much worse a firing fault must get to be said again",
+    "escalate_step_db": 6.0,
+    "escalate_step_by_rule": {
+      "crowd_dominating": 12.0,
+      "voice_dominates": 12.0
+    },
+
+    "_timing": "seconds a fault must hold before FIRE, and before CLEAR",
+    "attack_s": {
+      "silence": 12.0,
+      "stream_down": 45.0,
+      "too_loud": 30.0,
+      "too_quiet": 30.0,
+      "clipping": 3.0,
+      "peak_over": 10.0,
+      "crowd_dominating": 30.0,
+      "voice_dominates": 60.0,
+      "filler_playing": 180.0,
+      "no_crowd": 180.0
+    },
+    "release_s": {
+      "silence": 5.0,
+      "too_loud": 30.0,
+      "too_quiet": 30.0,
+      "clipping": 15.0,
+      "peak_over": 30.0,
+      "crowd_dominating": 30.0,
+      "voice_dominates": 20.0,
+      "filler_playing": 120.0,
+      "no_crowd": 120.0
+    },
+
+    "_off": "rules that do not apply at all, by id",
+    "disabled_rules": []
+  }
+}

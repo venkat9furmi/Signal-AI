@@ -33,10 +33,17 @@ services:
       # Copy a snapshot out with:  docker compose run --rm backup
       - commentary-qc-data:/data
       - ./channels.json:/app/channels.json:ro
+      # Threshold overrides, read-only and editable from the host. Anything
+      # not listed in it keeps the default from config.py, where the comment
+      # explaining each number lives. Change a value, then:
+      #   docker compose restart
+      # A typo is refused at startup rather than silently ignored.
+      - ./thresholds.json:/app/thresholds.json:ro
     command:
       - python
       - -m
       - commentary_qc.watch
+      - --config=/app/thresholds.json
       - --channels=/app/channels.json
       - --claims=/data/claims.db
       - --db=/data/live.db
@@ -81,10 +88,17 @@ services:
       # Copy a snapshot out with:  docker compose run --rm backup
       - commentary-qc-data:/data
       - ./channels.json:/app/channels.json:ro
+      # Threshold overrides, read-only and editable from the host. Anything
+      # not listed in it keeps the default from config.py, where the comment
+      # explaining each number lives. Change a value, then:
+      #   docker compose restart
+      # A typo is refused at startup rather than silently ignored.
+      - ./thresholds.json:/app/thresholds.json:ro
     command:
       - python
       - -m
       - commentary_qc.web
+      - --config=/app/thresholds.json
       - --db=/data/live.db
       - --channels=/app/channels.json
       - --claims-db=/data/claims.db
