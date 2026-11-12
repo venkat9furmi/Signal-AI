@@ -115,6 +115,13 @@ published. When you do:
 3. `translate/app/group.py` — one channel into several languages at once
 4. `tests/test_architecture.py` — the dependency rule, enforced
 
+### If you are taking the project over, not just reading it
+
+[HANDOVER.md](HANDOVER.md) — the things that are not in the code: what you
+need access to, which credentials exist and where, what lives only on the
+host machine and cannot be recreated, and what is waiting on somebody
+rather than on a commit.
+
 ### Before you change anything
 
 - **`thresholds.json`** — how to retune without touching code. Read its
