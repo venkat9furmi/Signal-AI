@@ -223,7 +223,7 @@ def test_no_live_credential_in_the_tree() -> None:
     hits: list[str] = []
     for path in list((ROOT / "src").rglob("*.py")) + \
             list((ROOT / "tests").rglob("*.py")) + \
-            [ROOT / "README.md", ROOT / "CLAUDE.md"]:
+            [ROOT / "README.md", ROOT / "ENGINEERING-LOG.md"]:
         if "__pycache__" in path.parts or not path.exists():
             continue
         text = path.read_text(encoding="utf-8", errors="ignore")

@@ -730,5 +730,5 @@ If you are picking this up cold:
    sitting.
 3. Read `core/ports.py`, then `adapters/mock/`. That is the whole translation
    architecture in two short files.
-4. Read `CLAUDE.md` for the history — every decision, why it was made, and
+4. Read `ENGINEERING-LOG.md` for the history — every decision, why it was made, and
    what it cost when it was made wrong.

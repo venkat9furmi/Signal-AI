@@ -1,7 +1,11 @@
-# Commentary QC — project context
+# Engineering log — SignalAI
 
-> Handoff brief for Claude Code. Save this as `CLAUDE.md` in the project root and it
-> loads automatically each session. Everything the assistant needs to continue is here.
+> The project diary: every decision, why it was made, and what it cost when it
+> was made wrong. Written as the work happened, newest sections last.
+>
+> Not a document to read front to back. **Search it** when you want to know why
+> something is the way it is — the answer is almost always in here, with a date
+> and the measurement behind it.
 
 ## What this is
 
@@ -289,7 +293,7 @@ match feed and Slack. Advice names the controls commentators actually have
 (Mic gain, Crowd slider, switch back to LIVE).
 
 **Operational gotchas** (also in memory `running-the-recorder`): set
-`FFMPEG_BIN` - the shell Claude launches from has no ffmpeg on PATH, and
+`FFMPEG_BIN` - a bare shell does not have ffmpeg on PATH, and
 watch.py now refuses to start without it; Smart App Control occasionally blocks
 scipy's `_qmc_cy` DLL on import (retry); liveness polling of 39 channels runs in
 parallel (~2 s), because 21 s sequential stalled the heartbeat.

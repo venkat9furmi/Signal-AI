@@ -119,7 +119,7 @@ published. When you do:
 
 - **`thresholds.json`** — how to retune without touching code. Read its
   `_readme`.
-- **`CLAUDE.md`** (1,167 lines) — not a document to read front to back. It is
+- **`ENGINEERING-LOG.md`** (1,167 lines) — not a document to read front to back. It is
   the project diary: every decision, why it was made, and what it cost when it
   was made wrong. **Search it** when you want to know why something is the way
   it is. The answer is almost always in there, with a date.
