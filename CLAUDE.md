@@ -935,3 +935,233 @@ the offline stand-in runs. README rewritten in plain language.
 
 Checks: 17 architecture, 202 translate, 121 live, 72 bench, 93 Gemini, plus the
 engine, DSP, Slack and backtest suites.
+
+## Session 9 - 2026-11-09: multi-language, identity from the words, page rebuilt
+
+Four things asked for and all four built: **one source into several languages
+at once**, **which match is on a channel**, **wrong-language detection**, and
+the translate page redesigned around the user's own sequence (source -> model
+-> languages -> listen -> broadcast, the last locked as version 2).
+
+### One pull, several languages (`app/fanout.py`, `app/group.py`)
+
+A `LiveGroup` is one channel, one ffmpeg pull and one model session per output
+language. The fan-out sits **at the `AudioSource` port**, so nothing above it
+changed: a leg is an ordinary `LiveRun` and never learns two others are
+reading the same bytes. Every endpoint that serves one run - audio, stop, poll
+- works on a leg unchanged.
+
+Sharing the pull is not thrift. Three independent pulls of a live HLS stream
+start at whatever segment the CDN is serving, so the Greek output could be
+seconds ahead of the German one and nobody comparing them would know why.
+Two things make the legs genuinely comparable, and **both were bugs the tests
+found**:
+
+- **The pull waits for the group to assemble** (`ASSEMBLE_S`, 8 s, returns the
+  instant the expected listeners have joined). Each leg opens its own session
+  before it asks for audio and sessions do not boot in step, so the first leg
+  to arrive was consuming audio the others never saw: measured 6.0 / 4.6 /
+  4.0 s on a three-language run before the fix, identical after.
+- **Opening is serialised per channel-and-rate** by a lock per key. Without
+  it three legs can each find no pull, each spawn ffmpeg, and two of those
+  processes get thrown away *after* taking a second copy of the stream from
+  the vendor - and the group can end up split across two pulls. A test forces
+  the race with a barrier and a deliberately slow resolve.
+
+Back-pressure is the project's existing rule: a slow listener loses its
+**oldest** audio, counted and reported; the reader thread never blocks,
+because a realtime session answers a slow client by hanging up.
+
+**Refusals happen before anything is spent**: more languages than
+`live_targets_max` (4, `QC_LIVE_TARGETS_MAX`), or more than the provider
+declares it will hold open. Camb's adapter now states `max_live_sessions = 1`
+from its free plan, so the app refuses a group rather than letting the far end
+refuse the second session once the meter is running. The app asks the adapter;
+it does not read vendor plans.
+
+A leg failing takes only its own language down - a Greek session refused for
+an unsupported language must not cost you the German translation.
+
+**A real bug this surfaced, worth remembering:** `LiveRun.running` was
+`not finished`, so a run that was *never started* reported itself as running
+forever. The group's budget check happens after the runner has taken the legs
+on, so a refusal left the channel - and the single-channel slot - blocked
+until the process restarted. `running` now means started and not finished,
+and `start_group` rolls back its registration if `start()` raises.
+
+### What the commentary says the channel is (`core/identify.py`)
+
+Pure functions over text, no I/O, 28 checks on commentary written
+independently of the word lists (scoring a vocabulary against itself proves
+nothing).
+
+- **Language**: Greek by alphabet - not a guess, the script is not shared.
+  The rest by *function words chosen for contrast*: "che" against "que",
+  "non" against "no"/"nao", "molto" against "muy"/"muito". Football words
+  were the tempting choice and the wrong one - "fuorigioco" appears twice a
+  match, "che" appears in every sentence. Needs 12 words and a 1.35x margin
+  over the runner-up, else it says nothing.
+- **Match**: team-name tokens against the fixture feed, with club-type words
+  ("fc", "city", "united", "real") dropped - a transcript containing "city"
+  tells you nothing when four fixtures are City sides. **Both sides named
+  beats more hits on one side**, as a sort key rather than a weighted sum, so
+  a derby cannot be decided by whichever club is named more often. One side
+  only = 0.45 confidence and says so.
+- **`auto` is not a claim.** The racing channels have no language in
+  `channels.json`, so treating `auto` as configured reported a wrong-language
+  fault on every one of them, every run. Found on live audio.
+
+Wired into both the group snapshot and single-run `live_state`. The fixture
+feed and the QC snapshot are passed into `build_router` from `web.py` - both
+already in that process, so neither costs a probe.
+
+**`qc_snapshot` is passed as a lambda**, because `snapshot` is defined further
+down `create_app` than the `build_router` call: naming it directly binds a
+local that does not exist yet, and the container crash-looped on
+`UnboundLocalError` until it was deferred.
+
+### The channel picker reads the QC engine
+
+`/{mode}/channels` now returns liveness, the current state (commentary /
+holding clip / silent), the level, any fault, who claimed it and the match -
+read from the quality side's own snapshot, not probed. Live channels sort
+first. This platform's live commentary runs 5-7 dB under target, so
+translating a quiet or filler channel means judging a model on audio no model
+could do much with, without being told that is what happened. Verified live:
+football-07 showed "silent / NO AUDIO" before it could be picked.
+
+### The page (`static/translate.html`, rewritten)
+
+Five numbered steps in one column - numbered because it genuinely is a
+sequence. Gone: the coverage matrix, the scoreboard, the bench tab, the mode
+chips (the old page is in git). The clip path is no longer a peer of live.
+
+- Step 3 shows **seconds pulled once against seconds charged**, so the cost
+  shape of three languages is on screen before the button.
+- Step 4 gives each language its own panel with both audio players and a
+  **synced transcript**: the highlight follows the *commentary* player,
+  because that file's timeline is the run's. The translated side is only the
+  moments the model was speaking, concatenated, so its clock is a different
+  clock - interpolating across it would look precise and drift. Phrase-level,
+  not word-level: neither provider gives per-word timestamps on the live
+  socket.
+- **Audio elements are built once per leg** and never rebuilt on a poll
+  (Session 7's lesson, kept).
+- The offline stand-in now warns **in the caption feed**, not only on the
+  model card. The card said "it is not listening" and the captions still read
+  like a transcript, which is where somebody reads them.
+
+### Verified on live audio, 9 Nov
+
+Three languages on `football-01` and on `horses-01`, two on `horses-03`:
+one pull, `listeners: 3`, 0 dropped, every leg sent an **identical** number of
+seconds, and the heard WAVs came back **byte-identical in size** (1,487,946 B
+each) - the shared pull proven from outside. 28 s pulled -> 84 s charged.
+139 of today's fixtures considered. Refusals over HTTP: 5 languages -> 409
+naming the setting, no languages -> 400, bad channel name -> 400, Camb
+without a key -> 400, a second channel -> 409, `standard` -> 501, unknown
+mode -> 404. A dead channel reports every URL it tried.
+
+Checks: 68 multi-language, 28 identify, 17 architecture, 202 translate, 121
+live, 101 Gemini, 76 security, 72 bench, 13 wiring, plus engine, DSP, Slack
+and backtest.
+
+**The flake, explained - and the assertion was the bug.** The leg-alignment
+check failed intermittently, and only when the suite ran beside the others.
+Cause: the fake feed yielded blocks as fast as the CPU allowed, so under load
+a leg got starved of scheduling, its 24-block queue overflowed and it
+correctly dropped its oldest audio. The fan-out was right; the test demanded
+the legs always match. Two changes: the fake feed is **paced** at 3 ms a block
+(a real one delivers one every 100 ms, which is what makes the queue two
+seconds of slack), and the assertion now states the real invariant - **legs
+may differ only by audio that was dropped, and a drop must be reported**.
+Confirmed by reproducing it under deliberate load and then passing.
+
+**Still the `mock` provider** - no key in `.translate.env`. So the identity
+features are proven on text and proven to be wired on live audio, but the
+transcript they read is the stand-in's own English vocabulary. Whether Gemini
+really offers Greek, and whether language detection works on real ASR output,
+needs a key.
+
+## Design pass - 2026-11-11: shared tokens, and why it looked generated
+
+User's verdict on the rebuilt translate page: "looks like AI made general
+frontend design", "i see no borders". Both were fair, and the causes were
+specific rather than a matter of taste.
+
+### What was actually wrong
+
+- **Chrome was shouting and content was whispering.** Big amber uppercase
+  condensed headings; channel names, loudness figures and captions small and
+  grey. The largest, brightest thing on screen should be a measurement, not
+  the word "THE SOURCE".
+- **The accent was everywhere**, so it could no longer mark anything. It now
+  marks what is selected, what is live, and the one figure that matters
+  (seconds charged).
+- **Separation was done with background fills *and* a solid opaque line**
+  (`#2e2e38`). Dark interfaces that stack three greys go muddy. Now: one
+  surface, and semi-transparent borders at 7% / 13% / 22%.
+- **Ad-hoc spacing.** Nothing sat on a grid, which reads as almost-aligned -
+  worse than obviously loose.
+- **16px base type** on what is an operational tool. 13px now, rows 32px.
+
+### `static/ui.css`
+
+Tokens and primitives, shared by every page, served from a single route
+(`/static/ui.css`) rather than a mounted directory - the only file in
+`static/` worth serving is this one, and mounting the folder would publish
+whatever lands in it next. Read per request so editing it needs no restart.
+
+Primitives: `.panel` (+ `.panel-head` / `.panel-body`), `.chip`, `.btn`,
+`.note`, `.field` / `.strip`, `.label`, `.num`. A 4px spacing scale, a type
+scale, three border weights, semantic colours kept separate from the accent.
+Every figure is `font-variant-numeric: tabular-nums`, because the page is
+mostly columns of numbers and proportional digits make a column look bent.
+
+### The translate page, rebuilt on it
+
+- **A rail with a visible spine** joining the five step numbers. The sequence
+  is real, so drawing it is information. First attempt used the 7% hairline
+  and it was invisible against the ground - the complaint in its purest form,
+  a border that was present and doing nothing. It is the 13% line now.
+- **The channel list is a real table**: sticky header, fixed columns, LUFS
+  right-aligned with the unit in the header rather than repeated down every
+  row, and a 3px severity stripe down the left edge so state has a shape and
+  not only a hue.
+- **The cost strip** gives the page its one large size: languages, audio
+  pulled, audio charged. That relationship is the whole point of the shared
+  pull.
+- **The transcript** got a rule between heard and said. Without it they were
+  two columns of short text with 12px of nothing between them, reading as two
+  unrelated lists rather than one line in two languages.
+- **The last run is adopted on load** whether or not it is still running. A
+  refresh that threw away the result you were about to judge is the one
+  behaviour nobody would forgive.
+
+Each of those came from looking at a headless-Chrome screenshot of the real
+page with real data, not from reasoning about the markup. Defects that only a
+render shows: a duplicated sentence (shadow mode's `purpose` already ends with
+"nothing is published" and the page appended its own copy), three channels all
+truncating to "Horses C...", and "On air, not measured" overflowing a pill.
+
+### The QC dashboard: one line, and it was a cascade collision
+
+`/qc` had no side gutter at all - every section touched x=0. Cause:
+`.matches{padding:22px 0 6px}` and `.work{...padding:22px 0 50px}` sit on
+elements that also carry `.wrap`, and the `padding` **shorthand** silently
+wiped `.wrap`'s `padding: 0 24px`. Both are `padding-block` now, which sets
+only the vertical halves. Nothing else on that page was touched: it is the
+production tool with 7k alerts behind it, and the fault was structural rather
+than stylistic.
+
+The landing page was left as it is - it already has borders, a gutter and the
+same colour family. Unifying it onto the tokens is worth doing and was not
+done here.
+
+### Reference
+
+Checked against current practice rather than invented: a 13px base on a 4px
+grid with ~32px rows; separation by semi-transparent border rather than by a
+second background; the brand colour under about 5% of pixels; one sans and one
+mono. Sources in the session, chiefly a write-up of Linear's token and density
+choices and a SaaS frontend-design guide.

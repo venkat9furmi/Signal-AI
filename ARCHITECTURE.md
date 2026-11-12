@@ -155,11 +155,11 @@ every 1.024 s a MetricsWindow arrives
           │
           ▼
   held long enough (attack)?  ──→ FIRE
-  already firing and 6 dB worse? ──→ ESCALATE
+  already firing and a step worse? ──→ ESCALATE
   clear long enough (release)? ──→ CLEAR
 ```
 
-Three things stop it being noisy, and all three were added because it *was*
+Five things stop it being noisy, and every one was added because it *was*
 noisy:
 
 1. **Thermostats.** "Too quiet" fires below −40 LUFS and only clears above
@@ -173,6 +173,139 @@ noisy:
    incident: Ch.31 reported "17 samples at full scale, +2.5 dBTP" seven times
    over six minutes, and it was the holding clip being blamed on a commentator
    who was not there.
+4. **A stream that stops has to stay stopped** (added 12 November).
+   `stream_down` fired on the first missed segment, which is a ten-second
+   stall or one failed reconnect. Measured over 2,010 of them: median outage
+   **9 seconds**, 53% over inside fifteen, and 556 were our own container
+   failing to resolve the vendor's hostname. It waits
+   `attack_s["stream_down"]` (45 s) now — 62% fewer — and a gap too short to
+   report no longer clears the other rules, so one fault stops reading as two.
+   `on_reconnect` returns `None` in that case rather than clearing an alert
+   nobody was sent.
+5. **"Worse" means the same thing on every scale** (added 12 November).
+   `silence` was removed from `_ESCALATION_SCALE`: a dead channel drifting
+   from −50 to −56 LUFS trips a 6 dB step, and it escalated on a quarter of
+   its 293 fires. There is no worse than dead. And the balance rules now take
+   their own step via `escalate_step_by_rule` (12 dB), because voice-over-crowd
+   spans 1.4 to 33.4 dB across real commentary where loudness spans a few —
+   one global number meant `crowd_dominating` escalated on **72%** of its
+   fires.
+
+
+### Every alert, its threshold, and where the number came from
+
+Eleven alerts. Ten are rules in `RULES` (`engine.py`); `stream_down` is raised
+by the capture loop rather than by a rule, because a stream that is absent
+produces no window to judge.
+
+All thresholds live in one place — `Thresholds` in `config.py` — and every one
+carries a comment saying where its number came from.
+
+**To change one, edit `thresholds.json` in the project root and
+`docker compose restart`.** No rebuild. Anything not listed in that file keeps
+the `config.py` default, so `config.py` stays the single source of truth for
+both the values and the reasoning; the JSON is overrides only. Its `_example`
+block lists every name at its current default — and a test asserts that block
+really does match the defaults, so it cannot drift into fiction.
+
+A typo or a contradiction is refused **at startup**: a silently-dropped
+threshold is an outage nobody can see. Because the containers restart on
+failure, a bad edit crash-loops the recorder rather than running it on the old
+numbers — `docker compose logs --tail 20 recorder` will say
+`unknown Thresholds keys`.
+
+| Alert | Fires when | Attack | Release | Severity |
+|---|---|---|---|---|
+| `silence` | loudness (3 s) < **−50 LUFS** | 12 s | 5 s | critical |
+| `stream_down` | no audio arriving at all | **45 s** | — | critical |
+| `clipping` | **≥ 3** consecutive samples at full scale | 3 s | 15 s | critical |
+| `filler_playing` | repeat score ≥ **0.6**, *or* all three of speech > 0.88 / crowd < −40 / level sd < 1.6 | 180 s | 120 s | critical |
+| `too_loud` | loudness (1 min) > **−17 LUFS**, clears below **−19** | 30 s | 30 s | warning |
+| `too_quiet` | loudness (1 min) < **−40 LUFS**, clears above **−37** | 30 s | 30 s | warning |
+| `peak_over` | true peak > **−1 dBTP** and not already clipping | 10 s | 30 s | warning |
+| `crowd_dominating` | voice < **6 dB** over the crowd bed | 30 s | 30 s | warning |
+| `voice_dominates` | voice > **20 dB** over the crowd bed | 60 s | 20 s | warning |
+| `no_crowd` | crowd bed < **−45 LUFS** | 180 s | 120 s | info |
+| `clip_repeat` | 3 identical fault messages inside 7 minutes | — | — | note |
+
+`clip_repeat` is not a fault. It is the engine explaining why it has gone
+quiet: identical numbers mean a recording, not a person.
+
+**Where the numbers came from**
+
+- **−17 / −19 LUFS (too loud).** A blind listening test on 2026-09-10 (24
+  clips, fixed playback volume) put "too loud" at −18.2 LUFS; AES TD1008 puts
+  streamed speech at −18 with about ±2 LU. Both land near −17.
+- **−40 / −37 LUFS (too quiet).** The same listener only called clips quiet
+  below about −41. A line at −40 disagreed with them on 4 of 24 clips, against
+  14 of 24 for the old −23. The commentator is interrupted only when genuinely
+  hard to hear; compliance with the −18 target belongs in the match report,
+  not a live alert.
+- **Both judge `lufs_minute`,** a median over about a minute, not the 3-second
+  figure — which swung with every shout and pause and was most of the noise.
+- **−50 LUFS (silence)** is the floor below which the feed counts as dead
+  rather than merely quiet, so dead air fires instead of too-quiet.
+- **−1 dBTP (peak_over)** is EBU R128. A standards line, not a tuned one.
+- **3 samples at full scale (clipping)** separates a flat-topped waveform —
+  audible distortion — from an inter-sample over. Split from `peak_over` so a
+  −0.8 dBTP peak stops reading "DISTORTING".
+- **6 dB (crowd_dominating).** Listening research prefers about 9 dB of speech
+  over a steady crowd (EBU / BBC / Fraunhofer dialogue-enhancement work). In
+  our own tests the crowd was heard taking over at 3.9 and 7.4 dB while
+  8.8–9.0 dB was fine. The old 1.8 dB came from converting MMC's prototype
+  band and was about 2 dB too lax on the fault that matters most.
+- **20 dB (voice_dominates).** The converted 13.8 dB flagged 44.7% of 19,137
+  windows of live Champions League commentary. 20 dB was its 85th percentile.
+  **See the caveat below — this did not fix it.**
+- **0.6 (filler repeat score).** Replayed across three recorded nights and 24
+  channels: every labelled filler stretch scored 0.77–1.00 and live commentary
+  0.2–0.5, and the rule never fired during a match half.
+- **0.88 / −40 / 1.6 (the three filler signals).** Measured 2026-09-07 across
+  three channels and two live matches, with no overlap between filler and live
+  on any of the three. All three must agree, so one odd channel cannot trigger
+  it. The giveaway is the speech ratio: a recorded announcement talks
+  continuously, a real commentator breathes.
+- **45 s (stream_down).** Measured over 2,010 outages to 2026-11-12: the
+  median lasted **9 seconds**, 53% were over inside fifteen, and 556 were our
+  own container failing to resolve the vendor's hostname. 45 s removes 62% of
+  them and keeps the quarter that lasted minutes.
+- **12 s (silence attack).** `football-01`'s playout cycle contains a
+  structural 8.8 s silence every 36.7 s. A 5 s attack fired on every one —
+  about 98 false alerts an hour.
+
+**Machinery that applies across the rules**
+
+- **Thermostats.** `too_loud` and `too_quiet` fire at one line and clear at
+  another a few dB inside it, so a channel sitting on the line produces one
+  alert rather than a stream.
+- **Clip masking.** While a holding clip is playing, the seven rules marked
+  clip-masked are frozen and cleared — nobody is on air to fix a recorded
+  file. `silence`, `stream_down` and `filler_playing` still fire, because
+  those matter whatever is playing.
+- **Escalation.** A firing fault that gets a step worse raises `ESCALATE`,
+  prefixed "Getting worse — ". The step is 6 dB, except the balance rules at
+  12 dB: voice-over-crowd spans 1.4 to 33.4 dB across real commentary where
+  loudness spans a few, so one number meant different things. `silence` and
+  `filler_playing` never escalate — a dead channel cannot get deader.
+- **"No evidence" is a third answer.** The balance rules return `None` when
+  nobody is speaking or the crowd floor was not measured, which freezes the
+  timers instead of clearing a real fault.
+
+**Two thresholds that are probably wrong, and should not just be nudged**
+
+Measured against the stored windows on 2026-11-12, separating live commentary
+from the holding clip:
+
+- `voice_dominates` at 20 dB flags **48%** of live commentary windows. The
+  median is 19.2 dB — the line sits on the median.
+- `no_crowd` at −45 LUFS flags **46%**. The median crowd bed is −42.3.
+
+Both only fire a few hundred times because the attack times and clip masking
+suppress them; the hysteresis is covering for a badly placed line. That two
+rules in the same family fail the same way points at the **measurement** — the
+crowd level is derived from VAD gaps, which on a studio feed is room tone
+between words — rather than at the numbers on it. Settle that before retuning
+either.
 
 ### "No evidence" is a third answer, not a false
 
@@ -541,11 +674,36 @@ Copy this into whatever you track work in.
 
 **Ready to do**
 
+- [ ] **Route alerts by who can act on them.** Worked out on 12 November from
+      58 days of history, not built. Five go to the commentator — `silence`,
+      `clipping`, `too_quiet`, `too_loud`, `crowd_dominating` — because each
+      names a knob they can turn, and together they are about 3.4 alerts per
+      90-minute broadcast. `stream_down` and `filler_playing` have no
+      recipient at MMC (the second fires *because* the booth is empty), and
+      `peak_over`, `voice_dominates` and `no_crowd` belong in the post-match
+      report. It is `notify.py` and `report.py`; no detector changes, so it is
+      reversible in a line.
 - [ ] Run a real match through Gemini and listen to it end to end
 - [ ] Tick Docker Desktop → Settings → General → start on sign-in
 - [ ] Set `QC_PASSCODE` before the page leaves localhost
 - [ ] Sit with a commentator during a match and watch them use it
 - [ ] Split the route handlers out of `web.py`
+
+**Needs investigating, not patching**
+
+- [ ] **Do the crowd rules measure a crowd?** Against the stored windows on
+      12 November, `voice_dominates` (> 20 dB) flags **48%** of live
+      commentary and `no_crowd` (< −45 LUFS) flags **46%** — both lines sit on
+      the median of normal output, so neither is a fault detector. They fire
+      rarely only because the attack times and clip masking suppress them.
+      Two rules failing the same way points at the measurement — the crowd
+      level is derived from VAD gaps, which on a studio feed is room tone
+      between words — rather than at the thresholds on it. Settle this before
+      retuning either number.
+- [ ] **Confirm the clipping fix worked.** `clipping` ran at 99 fires a day
+      and was the noisiest real fault; the 9 November clip-repeat fix should
+      have cut it hard, but it has only a few quiet days of evidence. Check it
+      on the first busy Saturday.
 
 **When there is a reason**
 

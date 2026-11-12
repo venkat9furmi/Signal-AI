@@ -33,7 +33,7 @@ something sounded off. This does that job, on all 52 channels at once.
 | **Buried in the crowd** | Your voice is under the atmosphere | lower the Crowd slider |
 | **No atmosphere** | No crowd bed at all | raise the Crowd slider |
 | **Holding clip playing** | A recording is on air, not a person | switch back to LIVE |
-| **Stream stopped** | We lost the feed | it says whether it is us or them |
+| **Stream stopped** | We lost the feed, for 45 s or more | it says whether it is us or them |
 
 The wording matters: each one names a control the commentator actually has in
 the MOD publishing tools, rather than describing the physics.
@@ -52,7 +52,7 @@ knows that.
 
 ### Why the alerts are not noisy
 
-Three layers, because an alerting system nobody trusts is worse than none:
+Five layers, because an alerting system nobody trusts is worse than none:
 
 - **Thermostats.** "Too quiet" fires below −40 and only clears above −37, so a
   channel sitting exactly on the line produces one alert instead of a stream
@@ -67,6 +67,19 @@ Three layers, because an alerting system nobody trusts is worse than none:
   commentator who was not there. Real speech never peaks at exactly the same
   sample count twice, so three identical messages now pause those rules and
   say why.
+- **A stream that stops has to stay stopped.** `stream_down` used to fire on
+  the first missed segment. Measured over 2,010 of them to 12 November: the
+  median outage lasted **9 seconds**, 53% were over inside fifteen, and 556
+  were our own container failing to resolve the vendor's hostname — not a
+  broadcast fault at all. It now waits 45 seconds, which removes 62% of them
+  and keeps the quarter that lasted minutes. A gap that short no longer
+  clears your other faults either, so one fault stops reading as two.
+- **"Getting worse" means the same thing on every scale.** Dead air no longer
+  escalates: a channel drifting from −50 to −56 LUFS is already dead, and it
+  was tripping the 6 dB step on a quarter of its alerts. The balance rules get
+  their own 12 dB step, because voice-over-crowd spans 1.4 to 33.4 dB across
+  real commentary where loudness spans a few — one number for both meant
+  `crowd_dominating` escalated on 72% of its fires.
 
 ---
 
@@ -78,6 +91,69 @@ match is still going.
 This is **in testing**. Nothing it produces is published, and no commentator
 sees it. It exists so you can listen and decide whether a model is good
 enough to put in front of anyone.
+
+### Five steps on one page
+
+The page at `/translate` is a sequence, and the numbers mean it:
+
+1. **The source.** Channels that are on air, live ones first, each with what
+   the quality engine currently hears on it &mdash; commentary, the vendor's
+   holding clip, silence, or a fault, with its level. A bad source makes a
+   good model look bad, and this is how you avoid judging a model on audio no
+   model could do much with.
+2. **The model.** One that cannot be picked says why in a line.
+3. **Out loud in.** One or more output languages. Languages the chosen model
+   does not carry are struck through rather than quietly missing.
+4. **Listen.** It translates while the match is going. Each language gets the
+   commentary and its own translated voice as playable audio, and the
+   transcript follows whichever you are playing.
+5. **Broadcast it back.** Present, locked, and it lists what building it needs.
+
+### One commentator, several languages
+
+MMC pays one person to call a match in English; the markets that want it are
+Greek, German, Italian and French. So a run takes several output languages at
+once: **one ffmpeg pull, one model session per language.**
+
+That the pull is shared is not just thrift. Three independent pulls of a live
+HLS stream start at whatever segment the CDN is serving at that instant, so
+the Greek output could be eight seconds ahead of the German one and nobody
+comparing them would know why. The pull also waits for every leg to open its
+session before it reads the first block, so all of them hear the same opening
+second.
+
+The page shows both numbers: seconds pulled once, and seconds charged. Three
+languages for thirty seconds is thirty seconds of audio and ninety seconds of
+billing.
+
+Each leg is independent. A Greek session refused for an unsupported language
+does not cost you the German translation that was working. A provider that
+documents a concurrency of one &mdash; Camb's free plan does &mdash; refuses a
+multi-language group up front, before anything is spent, rather than letting
+the far end refuse the second session once the meter is running.
+
+### Two things it works out from the words
+
+Both fall out of transcription at no extra cost, and both answer a question
+the quality engine cannot, because it measures levels rather than words.
+
+- **Which language is actually on the channel.** `channels.json` carries a
+  language per channel, but that column is hand-maintained on the vendor's
+  side: it says what the channel is *for*. A commentator who signs into the
+  wrong channel produces perfectly good audio in the wrong language, every
+  level rule passes, and nothing notices. Greek is settled by its alphabet;
+  the rest are scored on function words, because "che" against "que" and
+  "non" against "no" are what actually separate them. A channel with no
+  language recorded &mdash; the racing ones &mdash; can never be a mismatch.
+- **Which match is being played.** Nothing else in the system can work this
+  out: the commentator picks their match when they claim a channel, and that
+  claim is also what turns Slack delivery on, so forgetting to claim means a
+  channel measured in silence. The commentator says both team names out loud
+  in the first minute. A transcript naming one team has found a *club*; one
+  naming both has found a *fixture*, and only the second is worth acting on,
+  so they are reported differently.
+
+Both report a confidence and a runner-up rather than a bare answer.
 
 ### Two paths, and the difference is the point
 
@@ -111,8 +187,10 @@ commentary becomes training data until somebody agrees otherwise. Worth
 knowing before a real match goes through it.
 
 There are caps either way: a daily limit on audio sent, a per-channel limit,
-and a hard ceiling on one session, all seeded from the database so a restart
-does not hand back a fresh allowance.
+a hard ceiling on one session, and a limit on how many languages one run may
+produce, all seeded from the database so a restart does not hand back a fresh
+allowance. A group is checked against the budget for *every* leg before the
+first one opens, because half a comparison is worth less than none.
 
 ### What is not built
 
@@ -155,6 +233,44 @@ python -m commentary_qc.web
 
 ---
 
+## Changing a threshold
+
+Edit **`thresholds.json`** in the project root, then:
+
+```
+docker compose restart
+```
+
+That is the whole loop. No rebuild.
+
+Anything you do not list keeps the default from
+`src/commentary_qc/config.py`, which is also where the comment explaining
+**where each number came from** lives. Read that before changing one — every
+default has a measurement behind it. The file's own `_example` block lists
+every name at its current default; copy the ones you want into `"thresholds"`.
+
+```json
+{
+  "thresholds": {
+    "too_quiet_lufs": -38.0
+  }
+}
+```
+
+**A typo stops the recorder rather than being ignored.** A silently-dropped
+threshold is an outage nobody can see, so the loader refuses unknown names and
+contradictions (a clear level on the wrong side of its fire level) at startup.
+Because the container restarts on failure it will then crash-loop, so if the
+recorder will not come up after an edit:
+
+```
+docker compose logs --tail 20 recorder     # look for 'unknown Thresholds keys'
+```
+
+Fix the file and `docker compose restart`. Both services read it, because the
+page draws the same lines on its meters that the recorder judges against.
+
+
 ## Configuration
 
 Three files, none of them committed:
@@ -162,6 +278,7 @@ Three files, none of them committed:
 | File | Holds |
 |---|---|
 | `channels.json` | MMC's 52 football channels. Read-only in the container. |
+| `thresholds.json` | Threshold overrides. Read-only in the container; edit on the host and restart. |
 | `.slack.env` | Slack credentials, and `QC_PASSCODE` if you want sign-in. |
 | `.translate.env` | Model API keys. See `.translate.env.example`. |
 
@@ -194,6 +311,20 @@ Liveness needs no login: probing the stream host agrees with the vendor's own
 panel on which channels are up, and audio analysis has never needed
 credentials of any kind.
 
+### The pages
+
+`static/ui.css` holds the tokens and the primitives every page shares -- a 4px
+spacing scale, a type scale, three border weights, and semantic colours kept
+separate from the brand accent. It is served from its own route rather than a
+mounted directory, so nothing else in `static/` is published by accident.
+
+Three rules it follows, because the first version of the dubbing page broke
+all three and looked generated as a result: separation is a **border**, not a
+third background grey; everything sits on the **4px grid**; and **chrome
+recedes** -- headings are body size and differ by weight, so the biggest,
+brightest thing on screen is a channel name or a loudness figure. The accent
+marks what is selected and what is live, and nothing else.
+
 ### The translation side
 
 Laid out in layers that depend inwards only, which is checked by a test:
@@ -211,18 +342,29 @@ translate/
 wrong way. It is how "swapping the model is one file" stays true instead of
 being something that used to be true.
 
+`tests/test_wiring.py` covers the layer that one cannot: the composition
+root, where those layers are joined. It exists because of a bug on
+9 November that every other test missed — a route handler named `audio`
+silently replaced the `audio` dependency the handlers read, so all three
+paths that need audio failed with "'function' object has no attribute
+'resolve'". Each layer was tested and the joint between them was not.
+
 ---
 
 ## Tests
 
 ```
 python tests/test_architecture.py   # the dependency rule, enforced
+python tests/test_wiring.py         # the composition root actually wired up
 python tests/test_security.py       # keys, channel names, header filenames
+python tests/test_thresholds_file.py # thresholds.json loads, and its example is true
 python tests/test_engine.py         # the rules and their hysteresis
 python tests/test_dsp.py            # loudness, true peak, VAD
 python tests/test_translate.py      # mappers, modes, budget, the clip path
 python tests/test_live_translate.py # live sessions, against a fake server
 python tests/test_gemini.py         # the Gemini adapter, against a fake server
+python tests/test_multilanguage.py  # the shared pull, and groups of languages
+python tests/test_identify.py       # which language, and which match
 python tests/test_bench.py          # comparing models on one clip
 python tests/test_slack_delivery.py # delivery, against a fake Slack
 python tests/test_no_commentary.py  # the filler rule, against labelled nights
